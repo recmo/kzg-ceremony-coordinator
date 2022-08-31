@@ -12,8 +12,9 @@ use cli_batteries::await_shutdown;
 use eyre::{bail, ensure, Result as EyreResult, Result};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tower_http::trace::TraceLayer;
-use tracing::info;
+use tracing::{error, info};
 use url::{Host, Url};
+use valico::json_schema;
 
 #[derive(Clone, Debug, PartialEq, Parser)]
 pub struct Options {
@@ -33,6 +34,25 @@ pub async fn main(options: Options) -> EyreResult<()> {
         .route("/contribution/start", post(contribution::start))
         .route("/contribution/complete", post(|| async { "Hello, World!" }))
         .route("/contribution/abort", post(|| async { "Hello, World!" }));
+
+    // Load schema
+    let schema = serde_json::from_str(include_str!("../specs/contributionSchema.json")).unwrap();
+    let mut scope = json_schema::Scope::new();
+    let schema = scope.compile_and_return(schema, false).unwrap();
+
+    // Load initial contribution
+    let initial = serde_json::from_str(include_str!("../specs/initialContribution.json")).unwrap();
+    let validation = schema.validate(&initial);
+    if !validation.is_strictly_valid() {
+        for error in validation.errors {
+            error!("{}", error);
+        }
+        for missing in validation.missing {
+            error!("Missing {}", missing);
+        }
+        bail!("Initial contribution is not valid.");
+    }
+    info!("Initial contribution is valid.");
 
     // Run the server
     let (addr, prefix) = parse_url(&options.server)?;

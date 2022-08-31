@@ -36,12 +36,5 @@ pub struct PowersOfTau {
 pub async fn start(Json(payload): Json<serde_json::Value>) -> Json<serde_json::Value> {
     dbg!(&payload);
 
-    // Load schema
-    let schema = serde_json::from_str(include_str!("../specs/contributionSchema.json")).unwrap();
-    let mut scope = json_schema::Scope::new();
-    let schema = scope.compile_and_return(schema, false).unwrap();
-
-    dbg!(schema.validate(&payload));
-
     Json(payload)
 }
