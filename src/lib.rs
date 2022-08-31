@@ -3,6 +3,9 @@
 
 mod contribution;
 
+use ark_ec::AffineCurve;
+use ark_ff::fields::FpParameters;
+use ark_serialize::CanonicalSerialize;
 use axum::{
     routing::{get, post},
     Router, Server,
@@ -10,6 +13,10 @@ use axum::{
 use clap::Parser;
 use cli_batteries::await_shutdown;
 use eyre::{bail, ensure, Result as EyreResult, Result};
+use ruint::{
+    aliases::{U256, U384},
+    uint,
+};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tower_http::trace::TraceLayer;
 use tracing::{error, info};
@@ -50,9 +57,33 @@ pub async fn main(options: Options) -> EyreResult<()> {
         for missing in validation.missing {
             error!("Missing {}", missing);
         }
-        bail!("Initial contribution is not valid.");
+        // TODO bail!("Initial contribution is not valid.");
     }
     info!("Initial contribution is valid.");
+
+    let initial = serde_json::from_value::<contribution::Contributions>(initial)?;
+
+    // Verify that the initial contribution is valid
+
+    // Assert we are working in the correct field
+    let order: U256 = ark_bls12_381::FrParameters::MODULUS.into();
+    assert_eq!(
+        order,
+        uint!(52435875175126190479447740508185965837690552500527637822603658699938581184513_U256)
+    );
+
+    let g1 = ark_bls12_381::G1Affine::prime_subgroup_generator();
+    dbg!(g1);
+
+    let mut buffer = Vec::new();
+    dbg!(g1.serialize(&mut buffer));
+    dbg!(hex::encode(buffer));
+
+    // bbc622db0af03afbef1a7af93fe8556c58ac1b173f3a4ea105b974974f8c68c30faca94f8c63952694d79731a7d3f117
+    // 0x97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb
+
+    dbg!(U384::from(g1.x));
+    dbg!(U384::from(g1.y));
 
     // Run the server
     let (addr, prefix) = parse_url(&options.server)?;
