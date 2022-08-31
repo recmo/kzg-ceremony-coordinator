@@ -1,6 +1,8 @@
 #![doc = include_str!("../Readme.md")]
 #![warn(clippy::all, clippy::pedantic, clippy::cargo, clippy::nursery)]
 
+mod contribution;
+
 use axum::{
     routing::{get, post},
     Router, Server,
@@ -8,8 +10,8 @@ use axum::{
 use clap::Parser;
 use cli_batteries::await_shutdown;
 use eyre::{bail, ensure, Result as EyreResult, Result};
-use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use tower_http::trace::TraceLayer;
 use tracing::info;
 use url::{Host, Url};
 
@@ -20,26 +22,15 @@ pub struct Options {
     pub server: Url,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub enum IdType {
-    EthAddress,
-    EnsName,
-    GithubHandle,
-}
-
-pub struct ContributeStartRequest {
-    id_type: IdType,
-    id:      String,
-}
-
 pub async fn main(options: Options) -> EyreResult<()> {
     let app = Router::new()
+        .layer(TraceLayer::new_for_http())
         .route("/login", post(|| async { "Hello, World!" }))
         .route("/ceremony/status", get(|| async { "Hello, World!" }))
         .route("/queue/join", post(|| async { "Hello, World!" }))
         .route("/queue/checkin", post(|| async { "Hello, World!" }))
         .route("/queue/leave", post(|| async { "Hello, World!" }))
-        .route("/contribution/start", post(|| async { "Hello, World!" }))
+        .route("/contribution/start", post(contribution::start))
         .route("/contribution/complete", post(|| async { "Hello, World!" }))
         .route("/contribution/abort", post(|| async { "Hello, World!" }));
 
