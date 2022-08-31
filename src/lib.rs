@@ -1,46 +1,73 @@
 #![doc = include_str!("../Readme.md")]
 #![warn(clippy::all, clippy::pedantic, clippy::cargo, clippy::nursery)]
 
-pub mod server;
-mod utils;
-
-use crate::utils::spawn_or_abort;
+use axum::{
+    routing::{get, post},
+    Router, Server,
+};
 use clap::Parser;
 use cli_batteries::await_shutdown;
-use eyre::Result as EyreResult;
-use std::sync::Arc;
+use eyre::{bail, ensure, Result as EyreResult, Result};
+use serde::{Deserialize, Serialize};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tracing::info;
+use url::{Host, Url};
 
 #[derive(Clone, Debug, PartialEq, Parser)]
 pub struct Options {
-    #[clap(flatten)]
-    pub server: server::Options,
+    /// API Server url
+    #[clap(long, env, default_value = "http://127.0.0.1:8080/")]
+    pub server: Url,
 }
 
-/// ```
-/// assert!(true);
-/// ```
-#[allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum IdType {
+    EthAddress,
+    EnsName,
+    GithubHandle,
+}
+
+pub struct ContributeStartRequest {
+    id_type: IdType,
+    id:      String,
+}
+
 pub async fn main(options: Options) -> EyreResult<()> {
-    // Create App struct
-    let app = Arc::new(());
+    let app = Router::new()
+        .route("/login", post(|| async { "Hello, World!" }))
+        .route("/ceremony/status", get(|| async { "Hello, World!" }))
+        .route("/queue/join", post(|| async { "Hello, World!" }))
+        .route("/queue/checkin", post(|| async { "Hello, World!" }))
+        .route("/queue/leave", post(|| async { "Hello, World!" }))
+        .route("/contribution/start", post(|| async { "Hello, World!" }))
+        .route("/contribution/complete", post(|| async { "Hello, World!" }))
+        .route("/contribution/abort", post(|| async { "Hello, World!" }));
 
-    // Start server
-    let server = spawn_or_abort({
-        async move {
-            server::main(app, options.server).await?;
-            EyreResult::Ok(())
-        }
-    });
-
-    // Wait for shutdown
-    info!("Program started, waiting for shutdown signal");
-    await_shutdown().await;
-
-    // Wait for server
-    info!("Stopping server");
-    server.await?;
+    // Run the server
+    let (addr, prefix) = parse_url(&options.server)?;
+    let app = Router::new().nest(prefix, app);
+    let server = Server::try_bind(&addr)?.serve(app.into_make_service());
+    info!("Listening on http://{}{}", server.local_addr(), prefix);
+    server.with_graceful_shutdown(await_shutdown()).await?;
     Ok(())
+}
+
+fn parse_url(url: &Url) -> Result<(SocketAddr, &str)> {
+    ensure!(
+        url.scheme() == "http",
+        "Only http:// is supported in {}",
+        url
+    );
+    let prefix = url.path();
+    let ip: IpAddr = match url.host() {
+        Some(Host::Ipv4(ip)) => ip.into(),
+        Some(Host::Ipv6(ip)) => ip.into(),
+        Some(_) => bail!("Cannot bind {}", url),
+        None => Ipv4Addr::LOCALHOST.into(),
+    };
+    let port = url.port().unwrap_or(8080);
+    let addr = SocketAddr::new(ip, port);
+    Ok((addr, prefix))
 }
 
 #[cfg(test)]
@@ -100,7 +127,6 @@ pub mod bench {
     use tokio::runtime;
 
     pub fn group(criterion: &mut Criterion) {
-        crate::server::bench::group(criterion);
         bench_example_proptest(criterion);
         bench_example_async(criterion);
     }
