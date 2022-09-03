@@ -20,3 +20,12 @@ Run benchmarks
 ```shell
 cargo criterion
 ```
+
+```
+cargo test -- -Z unstable-options --report-time --show-output
+```
+
+## To do
+
+* Separate out the core cryptography `/contribution` from queue, login and
+  json schema validation.

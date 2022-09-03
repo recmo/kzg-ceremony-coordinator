@@ -3,8 +3,9 @@
 
 mod contribution;
 
+use ark_bls12_381::{Fq, FqParameters, G1Affine};
 use ark_ec::AffineCurve;
-use ark_ff::fields::FpParameters;
+use ark_ff::{fields::FpParameters, BigInteger384, FromBytes, Zero};
 use ark_serialize::CanonicalSerialize;
 use axum::{
     routing::{get, post},
@@ -13,21 +14,105 @@ use axum::{
 use clap::Parser;
 use cli_batteries::await_shutdown;
 use eyre::{bail, ensure, Result as EyreResult, Result};
+use hex::FromHexError;
 use ruint::{
     aliases::{U256, U384},
     uint,
 };
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use thiserror::Error;
 use tower_http::trace::TraceLayer;
 use tracing::{error, info};
 use url::{Host, Url};
 use valico::json_schema;
+use ark_ff::BigInteger;
 
 #[derive(Clone, Debug, PartialEq, Parser)]
 pub struct Options {
     /// API Server url
     #[clap(long, env, default_value = "http://127.0.0.1:8080/")]
     pub server: Url,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug, Error)]
+pub enum ParseError {
+    #[error("Invalid length of hex string, expected {0} chars, got {1}")]
+    InvalidLength(usize, usize),
+    #[error("Invalid size of hex string, expected prefix \"0x\"")]
+    MissingPrefix,
+    #[error(transparent)]
+    InvalidHex(#[from] FromHexError),
+    #[error("Invalid x coordinate")]
+    BigIntError,
+    #[error("Point is not compressed")]
+    NotCompressed,
+    #[error("Point at infinity must have zero x coordinate")]
+    InvalidInfinity,
+    #[error("number is not in the field")]
+    InvalidXField,
+    #[error("not a valid x coordinate")]
+    InvalidXCoordinate,
+    #[error("curve point is not in prime order subgroup")]
+    InvalidSubgroup,
+}
+
+pub fn parse_hex<const N: usize>(hex: &str) -> Result<[u8; N], ParseError> {
+    let expected_len = 2 + 2 * N;
+    if hex.len() != expected_len {
+        return Err(ParseError::InvalidLength(expected_len, hex.len()));
+    }
+    if &hex[0..2] != "0x" {
+        return Err(ParseError::MissingPrefix);
+    }
+    let mut buffer = [0u8; N];
+    hex::decode_to_slice(&hex[2..], &mut buffer)?;
+    Ok(buffer)
+}
+
+/// See <https://github.com/zcash/librustzcash/blob/6e0364cd42a2b3d2b958a54771ef51a8db79dd29/pairing/src/bls12_381/README.md#serialization>
+pub fn parse_g1(hex: &str) -> Result<G1Affine, ParseError> {
+    // Read hex string
+    let mut bytes = parse_hex::<48>(hex)?;
+
+    // Read and mask flags
+    let compressed = bytes[0] & 0x80 != 0;
+    let infinity = bytes[0] & 0x40 != 0;
+    let greatest = bytes[0] & 0x20 != 0;
+    bytes[0] &= 0x1f;
+
+    // Read x coordinate
+    let x = {
+        let mut x = BigInteger384::default();
+        bytes.reverse();
+        let mut reader = &bytes[..];
+        x.read_le(&mut reader).map_err(|_| ParseError::BigIntError)?;
+        if reader.len() != 0 {
+            return Err(ParseError::BigIntError);
+        }
+        x
+    };
+    if x >= FqParameters::MODULUS {
+        return Err(ParseError::InvalidXField);
+    }
+    let x: Fq = x.into();
+
+    // Construct point
+    if !compressed {
+        return Err(ParseError::NotCompressed);
+    }
+    if infinity {
+        if greatest || x != Fq::zero() {
+            return Err(ParseError::InvalidInfinity);
+        }
+        return Ok(G1Affine::zero());
+    }
+    let point = G1Affine::get_point_from_x(x, greatest).ok_or(ParseError::InvalidXCoordinate)?;
+    debug_assert!(point.is_on_curve()); // Always true
+    if !point.is_in_correct_subgroup_assuming_on_curve() {
+        return Err(ParseError::InvalidSubgroup);
+    }
+
+    Ok(point)
 }
 
 pub async fn main(options: Options) -> EyreResult<()> {
@@ -59,19 +144,11 @@ pub async fn main(options: Options) -> EyreResult<()> {
         }
         // TODO bail!("Initial contribution is not valid.");
     }
-    info!("Initial contribution is valid.");
+    info!("Initial contribution is json-schema valid.");
 
     let initial = serde_json::from_value::<contribution::Contributions>(initial)?;
 
     // Verify that the initial contribution is valid
-
-    // Assert we are working in the correct field
-    let order: U256 = ark_bls12_381::FrParameters::MODULUS.into();
-    assert_eq!(
-        order,
-        uint!(52435875175126190479447740508185965837690552500527637822603658699938581184513_U256)
-    );
-
     let g1 = ark_bls12_381::G1Affine::prime_subgroup_generator();
     dbg!(g1);
 
@@ -118,6 +195,12 @@ pub mod test {
     use proptest::proptest;
     use tracing::{error, warn};
     use tracing_test::traced_test;
+
+    #[test]
+    fn test_parse_g1() {
+        assert_eq!(parse_g1("0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(), G1Affine::zero());
+        assert_eq!(parse_g1("0x97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb").unwrap(), G1Affine::prime_subgroup_generator());
+    }
 
     #[test]
     #[allow(clippy::eq_op)]
