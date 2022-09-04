@@ -2,18 +2,10 @@
 #![warn(clippy::all, clippy::pedantic, clippy::cargo, clippy::nursery)]
 
 mod contribution;
+mod parse_g;
 
+use crate::{contribution::Contributions, parse_g::parse_g};
 use ark_bls12_381::{Fq, FqParameters, G1Affine, G2Affine};
-use ark_ec::{
-    models::{ModelParameters, SWModelParameters},
-    short_weierstrass_jacobian::GroupAffine,
-    AffineCurve,
-};
-use ark_ff::{
-    fields::{Field, FpParameters, PrimeField},
-    BigInteger, BigInteger384, FromBytes, Zero,
-};
-use ark_serialize::CanonicalSerialize;
 use axum::{
     routing::{get, post},
     Router, Server,
@@ -22,10 +14,6 @@ use clap::Parser;
 use cli_batteries::await_shutdown;
 use eyre::{bail, ensure, Result as EyreResult, Result};
 use hex::FromHexError;
-use ruint::{
-    aliases::{U256, U384},
-    uint,
-};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use thiserror::Error;
 use tower_http::trace::TraceLayer;
@@ -40,108 +28,6 @@ pub struct Options {
     pub server: Url,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug, Error)]
-pub enum ParseError {
-    #[error("Invalid length of hex string, expected {0} chars, got {1}")]
-    InvalidLength(usize, usize),
-    #[error("Invalid size of hex string, expected prefix \"0x\"")]
-    MissingPrefix,
-    #[error(transparent)]
-    InvalidHex(#[from] FromHexError),
-    #[error("Invalid x coordinate")]
-    BigIntError,
-    #[error("Point is not compressed")]
-    NotCompressed,
-    #[error("Point at infinity must have zero x coordinate")]
-    InvalidInfinity,
-    #[error("number is not in the field")]
-    InvalidXField,
-    #[error("not a valid x coordinate")]
-    InvalidXCoordinate,
-    #[error("curve point is not in prime order subgroup")]
-    InvalidSubgroup,
-}
-
-pub fn parse_hex(hex: &str, out: &mut [u8]) -> Result<(), ParseError> {
-    let expected_len = 2 + 2 * out.len();
-    if hex.len() != expected_len {
-        return Err(ParseError::InvalidLength(expected_len, hex.len()));
-    }
-    if &hex[0..2] != "0x" {
-        return Err(ParseError::MissingPrefix);
-    }
-    hex::decode_to_slice(&hex[2..], out)?;
-    Ok(())
-}
-
-/// See <https://github.com/zcash/librustzcash/blob/6e0364cd42a2b3d2b958a54771ef51a8db79dd29/pairing/src/bls12_381/README.md#serialization>
-pub fn parse_g<P: SWModelParameters>(hex: &str) -> Result<GroupAffine<P>, ParseError> {
-    // Create some type aliases for the base extension, field and int types.
-    type Extension<P> = <P as ModelParameters>::BaseField;
-    type Prime<P> = <Extension<P> as Field>::BasePrimeField;
-    type Int<P> = <Prime<P> as PrimeField>::BigInt;
-    let modulus = <Prime<P> as PrimeField>::Params::MODULUS;
-
-    // Compute size
-    let extension: usize = Extension::<P>::extension_degree()
-        .try_into()
-        .expect("Extension degree should fit usize.");
-    let element_size = Int::<P>::NUM_LIMBS * 8;
-    let size = extension * element_size;
-
-    // Read hex string
-    let mut bytes = vec![0u8; size]; // TODO: Avoid alloc
-    parse_hex(hex, &mut bytes)?;
-
-    // Read and mask flags
-    let compressed = bytes[0] & 0x80 != 0;
-    let infinity = bytes[0] & 0x40 != 0;
-    let greatest = bytes[0] & 0x20 != 0;
-    bytes[0] &= 0x1f;
-
-    // Read x coordinate
-    let mut elements = bytes[..]
-        .chunks_exact_mut(element_size)
-        .map(|chunk| {
-            chunk.reverse();
-            let mut reader = &chunk[..];
-            let mut x = Int::<P>::default();
-            x.read_le(&mut reader)
-                .map_err(|_| ParseError::BigIntError)?;
-            if reader.len() != 0 {
-                return Err(ParseError::BigIntError);
-            }
-            if x >= modulus {
-                return Err(ParseError::InvalidXField);
-            }
-            let x = Prime::<P>::from_repr(x).ok_or(ParseError::InvalidXField)?;
-            Ok(x)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    elements.reverse();
-    let x =
-        Extension::<P>::from_base_prime_field_elems(&elements).ok_or(ParseError::InvalidXField)?;
-
-    // Construct point
-    if !compressed {
-        return Err(ParseError::NotCompressed);
-    }
-    if infinity {
-        if greatest || x != Extension::<P>::zero() {
-            return Err(ParseError::InvalidInfinity);
-        }
-        return Ok(GroupAffine::<P>::zero());
-    }
-    let point =
-        GroupAffine::<P>::get_point_from_x(x, greatest).ok_or(ParseError::InvalidXCoordinate)?;
-    debug_assert!(point.is_on_curve()); // Always true
-    if !point.is_in_correct_subgroup_assuming_on_curve() {
-        return Err(ParseError::InvalidSubgroup);
-    }
-
-    Ok(point)
-}
-
 pub async fn main(options: Options) -> EyreResult<()> {
     let app = Router::new()
         .layer(TraceLayer::new_for_http())
@@ -150,7 +36,7 @@ pub async fn main(options: Options) -> EyreResult<()> {
         .route("/queue/join", post(|| async { "Hello, World!" }))
         .route("/queue/checkin", post(|| async { "Hello, World!" }))
         .route("/queue/leave", post(|| async { "Hello, World!" }))
-        .route("/contribution/start", post(contribution::start))
+        .route("/contribution/start", post(|| async { "Hello, World!" }))
         .route("/contribution/complete", post(|| async { "Hello, World!" }))
         .route("/contribution/abort", post(|| async { "Hello, World!" }));
 
@@ -160,6 +46,7 @@ pub async fn main(options: Options) -> EyreResult<()> {
     let schema = scope.compile_and_return(schema, false).unwrap();
 
     // Load initial contribution
+    info!("Reading initial contribution.");
     let initial = serde_json::from_str(include_str!("../specs/initialContribution.json")).unwrap();
     let validation = schema.validate(&initial);
     if !validation.is_strictly_valid() {
@@ -173,21 +60,13 @@ pub async fn main(options: Options) -> EyreResult<()> {
     }
     info!("Initial contribution is json-schema valid.");
 
-    let initial = serde_json::from_value::<contribution::Contributions>(initial)?;
+    info!("Parsing initial contribution.");
+    let initial: Contributions = serde_json::from_value(initial)?;
+    info!("Parsing initial contribution done.");
 
-    // Verify that the initial contribution is valid
-    let g1 = ark_bls12_381::G1Affine::prime_subgroup_generator();
-    dbg!(g1);
-
-    let mut buffer = Vec::new();
-    dbg!(g1.serialize(&mut buffer));
-    dbg!(hex::encode(buffer));
-
-    // bbc622db0af03afbef1a7af93fe8556c58ac1b173f3a4ea105b974974f8c68c30faca94f8c63952694d79731a7d3f117
-    // 0x97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb
-
-    dbg!(U384::from(g1.x));
-    dbg!(U384::from(g1.y));
+    info!("Validating initial contribution.");
+    initial.validate()?;
+    info!("Validating initial contribution done.");
 
     // Run the server
     let (addr, prefix) = parse_url(&options.server)?;
@@ -222,18 +101,6 @@ pub mod test {
     use proptest::proptest;
     use tracing::{error, warn};
     use tracing_test::traced_test;
-
-    #[test]
-    fn test_parse_g1() {
-        assert_eq!(parse_g("0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(), G1Affine::zero());
-        assert_eq!(parse_g("0x97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb").unwrap(), G1Affine::prime_subgroup_generator());
-    }
-
-    #[test]
-    fn test_parse_g2() {
-        assert_eq!(parse_g("0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(), G2Affine::zero());
-        assert_eq!(parse_g("0x93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8").unwrap(), G2Affine::prime_subgroup_generator());
-    }
 
     #[test]
     #[allow(clippy::eq_op)]
@@ -276,6 +143,7 @@ pub mod test {
 #[cfg(feature = "bench")]
 #[doc(hidden)]
 pub mod bench {
+    use super::*;
     use criterion::{black_box, BatchSize, Criterion};
     use proptest::{
         strategy::{Strategy, ValueTree},
@@ -287,6 +155,7 @@ pub mod bench {
     pub fn group(criterion: &mut Criterion) {
         bench_example_proptest(criterion);
         bench_example_async(criterion);
+        parse_g::bench::group(criterion);
     }
 
     /// Constructs an executor for async tests

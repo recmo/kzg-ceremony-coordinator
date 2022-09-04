@@ -21,11 +21,24 @@ Run benchmarks
 cargo criterion
 ```
 
-```
+```shell
 cargo test -- -Z unstable-options --report-time --show-output
 ```
 
 ## To do
 
+* [x] Group element deserializer.
+* [ ] Reduce allocations in group deserializer.
+* [ ] Group element serializer.
+* [ ] Contribution deserializer.
+* [ ] Use &str in contribution deserializer.
+* [ ] Validate either all or none potPubkeys.
+* [ ] Validate non-trivial potPubkeys.
+* [ ] Validate distinct potPubkeys in subContributions.
+* [ ] Validate distinct potPubkeys in transcript.
+* [ ] Contribution validate by pairing checks.
+* [ ] Contribution parallel validator.
+* [ ] Contribution serializer.
+* [ ] Contribution validator.
 * Separate out the core cryptography `/contribution` from queue, login and
   json schema validation.
