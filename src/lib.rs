@@ -3,9 +3,16 @@
 
 mod contribution;
 
-use ark_bls12_381::{Fq, FqParameters, G1Affine};
-use ark_ec::AffineCurve;
-use ark_ff::{fields::FpParameters, BigInteger384, FromBytes, Zero};
+use ark_bls12_381::{Fq, FqParameters, G1Affine, G2Affine};
+use ark_ec::{
+    models::{ModelParameters, SWModelParameters},
+    short_weierstrass_jacobian::GroupAffine,
+    AffineCurve,
+};
+use ark_ff::{
+    fields::{Field, FpParameters, PrimeField},
+    BigInteger, BigInteger384, FromBytes, Zero,
+};
 use ark_serialize::CanonicalSerialize;
 use axum::{
     routing::{get, post},
@@ -25,7 +32,6 @@ use tower_http::trace::TraceLayer;
 use tracing::{error, info};
 use url::{Host, Url};
 use valico::json_schema;
-use ark_ff::BigInteger;
 
 #[derive(Clone, Debug, PartialEq, Parser)]
 pub struct Options {
@@ -56,23 +62,36 @@ pub enum ParseError {
     InvalidSubgroup,
 }
 
-pub fn parse_hex<const N: usize>(hex: &str) -> Result<[u8; N], ParseError> {
-    let expected_len = 2 + 2 * N;
+pub fn parse_hex(hex: &str, out: &mut [u8]) -> Result<(), ParseError> {
+    let expected_len = 2 + 2 * out.len();
     if hex.len() != expected_len {
         return Err(ParseError::InvalidLength(expected_len, hex.len()));
     }
     if &hex[0..2] != "0x" {
         return Err(ParseError::MissingPrefix);
     }
-    let mut buffer = [0u8; N];
-    hex::decode_to_slice(&hex[2..], &mut buffer)?;
-    Ok(buffer)
+    hex::decode_to_slice(&hex[2..], out)?;
+    Ok(())
 }
 
 /// See <https://github.com/zcash/librustzcash/blob/6e0364cd42a2b3d2b958a54771ef51a8db79dd29/pairing/src/bls12_381/README.md#serialization>
-pub fn parse_g1(hex: &str) -> Result<G1Affine, ParseError> {
+pub fn parse_g<P: SWModelParameters>(hex: &str) -> Result<GroupAffine<P>, ParseError> {
+    // Create some type aliases for the base extension, field and int types.
+    type Extension<P> = <P as ModelParameters>::BaseField;
+    type Prime<P> = <Extension<P> as Field>::BasePrimeField;
+    type Int<P> = <Prime<P> as PrimeField>::BigInt;
+    let modulus = <Prime<P> as PrimeField>::Params::MODULUS;
+
+    // Compute size
+    let extension: usize = Extension::<P>::extension_degree()
+        .try_into()
+        .expect("Extension degree should fit usize.");
+    let element_size = Int::<P>::NUM_LIMBS * 8;
+    let size = extension * element_size;
+
     // Read hex string
-    let mut bytes = parse_hex::<48>(hex)?;
+    let mut bytes = vec![0u8; size]; // TODO: Avoid alloc
+    parse_hex(hex, &mut bytes)?;
 
     // Read and mask flags
     let compressed = bytes[0] & 0x80 != 0;
@@ -81,32 +100,40 @@ pub fn parse_g1(hex: &str) -> Result<G1Affine, ParseError> {
     bytes[0] &= 0x1f;
 
     // Read x coordinate
-    let x = {
-        let mut x = BigInteger384::default();
-        bytes.reverse();
-        let mut reader = &bytes[..];
-        x.read_le(&mut reader).map_err(|_| ParseError::BigIntError)?;
-        if reader.len() != 0 {
-            return Err(ParseError::BigIntError);
-        }
-        x
-    };
-    if x >= FqParameters::MODULUS {
-        return Err(ParseError::InvalidXField);
-    }
-    let x: Fq = x.into();
+    let mut elements = bytes[..]
+        .chunks_exact_mut(element_size)
+        .map(|chunk| {
+            chunk.reverse();
+            let mut reader = &chunk[..];
+            let mut x = Int::<P>::default();
+            x.read_le(&mut reader)
+                .map_err(|_| ParseError::BigIntError)?;
+            if reader.len() != 0 {
+                return Err(ParseError::BigIntError);
+            }
+            if x >= modulus {
+                return Err(ParseError::InvalidXField);
+            }
+            let x = Prime::<P>::from_repr(x).ok_or(ParseError::InvalidXField)?;
+            Ok(x)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    elements.reverse();
+    let x =
+        Extension::<P>::from_base_prime_field_elems(&elements).ok_or(ParseError::InvalidXField)?;
 
     // Construct point
     if !compressed {
         return Err(ParseError::NotCompressed);
     }
     if infinity {
-        if greatest || x != Fq::zero() {
+        if greatest || x != Extension::<P>::zero() {
             return Err(ParseError::InvalidInfinity);
         }
-        return Ok(G1Affine::zero());
+        return Ok(GroupAffine::<P>::zero());
     }
-    let point = G1Affine::get_point_from_x(x, greatest).ok_or(ParseError::InvalidXCoordinate)?;
+    let point =
+        GroupAffine::<P>::get_point_from_x(x, greatest).ok_or(ParseError::InvalidXCoordinate)?;
     debug_assert!(point.is_on_curve()); // Always true
     if !point.is_in_correct_subgroup_assuming_on_curve() {
         return Err(ParseError::InvalidSubgroup);
@@ -198,8 +225,14 @@ pub mod test {
 
     #[test]
     fn test_parse_g1() {
-        assert_eq!(parse_g1("0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(), G1Affine::zero());
-        assert_eq!(parse_g1("0x97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb").unwrap(), G1Affine::prime_subgroup_generator());
+        assert_eq!(parse_g("0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(), G1Affine::zero());
+        assert_eq!(parse_g("0x97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb").unwrap(), G1Affine::prime_subgroup_generator());
+    }
+
+    #[test]
+    fn test_parse_g2() {
+        assert_eq!(parse_g("0xc00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(), G2Affine::zero());
+        assert_eq!(parse_g("0x93e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8").unwrap(), G2Affine::prime_subgroup_generator());
     }
 
     #[test]
