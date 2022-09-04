@@ -1,5 +1,5 @@
 use crate::parse_g::{parse_g, ParseError};
-use ark_bls12_381::{g1, g2, Fr, G1Affine, G2Affine};
+use ark_bls12_381::{g1, g2, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
 use ark_ec::{AffineCurve, ProjectiveCurve};
 use ark_ff::{One, Zero};
 use once_cell::sync::Lazy;
@@ -10,6 +10,7 @@ use std::cmp::max;
 use thiserror::Error;
 use tracing::error;
 use valico::json_schema::{Schema, Scope};
+use zeroize::Zeroizing;
 
 const SIZES: [(usize, usize); 4] = [(4096, 65), (8192, 65), (16384, 65), (32768, 65)];
 
@@ -216,35 +217,43 @@ impl Contribution {
 
     pub fn pairing_checks(&self, previous: &Self) {}
 
-    pub fn add_tau(&mut self, tau: Fr) {
+    pub fn add_tau(&mut self, tau: &Fr) {
         let n_tau = max(self.g1_powers.len(), self.g2_powers.len());
-        let powers = Self::pow_table(tau, n_tau);
+        let powers = Self::pow_table(&tau, n_tau);
         self.mul_g1(&powers[0..self.g1_powers.len()]);
         self.mul_g2(&powers[0..self.g2_powers.len()]);
-        self.pubkey = self.pubkey.mul(tau).into_affine();
+        self.pubkey = self.pubkey.mul(*tau).into_affine();
     }
 
-    fn pow_table(tau: Fr, n: usize) -> Vec<Fr> {
-        let mut powers = Vec::with_capacity(n);
-        let mut pow_tau = Fr::one();
-        powers.push(pow_tau);
+    fn pow_table(tau: &Fr, n: usize) -> Zeroizing<Vec<Fr>> {
+        let mut powers = Zeroizing::new(Vec::with_capacity(n));
+        let mut pow_tau = Zeroizing::new(Fr::one());
+        powers.push(*pow_tau);
         for _ in 1..n {
-            pow_tau *= tau;
-            powers.push(pow_tau);
+            *pow_tau *= *tau;
+            powers.push(*pow_tau);
         }
         powers
     }
 
     fn mul_g1(&mut self, scalars: &[Fr]) {
-        for (c, pow_tau) in self.g1_powers.iter_mut().zip(scalars.iter()) {
-            *c = c.mul(*pow_tau).into_affine();
-        }
+        let projective = self
+            .g1_powers
+            .par_iter()
+            .zip(scalars.par_iter())
+            .map(|(c, pow_tau)| c.mul(*pow_tau))
+            .collect::<Vec<_>>();
+        self.g1_powers = G1Projective::batch_normalization_into_affine(&projective[..]);
     }
 
     fn mul_g2(&mut self, scalars: &[Fr]) {
-        for (c, pow_tau) in self.g2_powers.iter_mut().zip(scalars.iter()) {
-            *c = c.mul(*pow_tau).into_affine();
-        }
+        let projective = self
+            .g2_powers
+            .par_iter()
+            .zip(scalars.par_iter())
+            .map(|(c, pow_tau)| c.mul(*pow_tau))
+            .collect::<Vec<_>>();
+        self.g2_powers = G2Projective::batch_normalization_into_affine(&projective[..]);
     }
 }
 
@@ -276,8 +285,8 @@ pub mod bench {
     fn bench_pow_tau(criterion: &mut Criterion) {
         criterion.bench_function("contribution/pow_tau", move |bencher| {
             let mut rng = rand::thread_rng();
-            let tau = Fr::rand(&mut rng);
-            bencher.iter(|| black_box(Contribution::pow_table(black_box(tau), 32768)));
+            let tau = Zeroizing::new(Fr::rand(&mut rng));
+            bencher.iter(|| black_box(Contribution::pow_table(black_box(&tau), 32768)));
         });
     }
 
@@ -286,8 +295,8 @@ pub mod bench {
             let mut contrib = Contribution::new(32768, 65);
             let mut rng = rand::thread_rng();
             bencher.iter_batched(
-                || Fr::rand(&mut rng),
-                |tau| contrib.add_tau(tau),
+                || Zeroizing::new(Fr::rand(&mut rng)),
+                |tau| contrib.add_tau(&tau),
                 BatchSize::SmallInput,
             );
         });

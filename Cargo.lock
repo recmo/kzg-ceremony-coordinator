@@ -1060,6 +1060,7 @@ dependencies = [
  "tracing-test",
  "url",
  "valico",
+ "zeroize",
 ]
 
 [[package]]

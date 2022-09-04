@@ -52,6 +52,7 @@ ark-bls12-381 = "0.3.0"
 hex = "0.4.3"
 rayon = "1.5.3"
 rand = "0.8.5"
+zeroize = "1.5.7"
 
 
 [dev-dependencies]
