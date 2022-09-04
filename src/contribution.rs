@@ -1,7 +1,7 @@
 use crate::parse_g::{parse_g, ParseError};
-use ark_bls12_381::{g1, g2, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
-use ark_ec::{AffineCurve, ProjectiveCurve};
-use ark_ff::{One, Zero};
+use ark_bls12_381::{g1, g2, Bls12_381, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
+use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
+use ark_ff::{One, UniformRand, Zero};
 use once_cell::sync::Lazy;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -21,6 +21,14 @@ const SIZES: [(usize, usize); 4] = [(4096, 65), (8192, 65), (16384, 65), (32768,
 // unwrap();     let schema = valico::schema::compile(schema).unwrap();
 //     schema
 // });
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Transcript {
+    pub g1_powers: Vec<G1Affine>,
+    pub g2_powers: Vec<G2Affine>,
+    pub products:  Vec<G1Affine>,
+    pub pubkeys:   Vec<G2Affine>,
+}
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Contribution {
@@ -206,6 +214,17 @@ impl PowersOfTau {
     }
 }
 
+impl Transcript {
+    pub fn new(num_g1: usize, num_g2: usize) -> Self {
+        Self {
+            pubkeys:   vec![G2Affine::prime_subgroup_generator()],
+            products:  vec![G1Affine::prime_subgroup_generator()],
+            g1_powers: vec![G1Affine::prime_subgroup_generator(); num_g1],
+            g2_powers: vec![G2Affine::prime_subgroup_generator(); num_g2],
+        }
+    }
+}
+
 impl Contribution {
     pub fn new(num_g1: usize, num_g2: usize) -> Self {
         Self {
@@ -214,8 +233,6 @@ impl Contribution {
             g2_powers: vec![G2Affine::prime_subgroup_generator(); num_g2],
         }
     }
-
-    pub fn pairing_checks(&self, previous: &Self) {}
 
     pub fn add_tau(&mut self, tau: &Fr) {
         let n_tau = max(self.g1_powers.len(), self.g2_powers.len());
@@ -255,6 +272,40 @@ impl Contribution {
             .collect::<Vec<_>>();
         self.g2_powers = G2Projective::batch_normalization_into_affine(&projective[..]);
     }
+
+    pub fn verify(&self, transcript: &Transcript) {
+        // TODO: Turn into errors
+        assert_eq!(self.g1_powers.len(), transcript.g1_powers.len());
+        assert_eq!(self.g2_powers.len(), transcript.g2_powers.len());
+
+        // Verify g1_powers[0]
+        pairing_check(
+            (self.g1_powers[1], G2Affine::prime_subgroup_generator()),
+            (*transcript.products.last().unwrap(), self.pubkey),
+        );
+
+        let tau2 = self.g2_powers[1];
+        for (prev, next) in self.g1_powers.iter().zip(self.g1_powers.iter().skip(1)) {
+            pairing_check((*next, G2Affine::prime_subgroup_generator()), (*prev, tau2));
+        }
+
+        // Verify g2 powers
+        for (g1, g2) in self.g1_powers.iter().zip(self.g2_powers.iter()) {
+            pairing_check(
+                (*g1, G2Affine::prime_subgroup_generator()),
+                (G1Affine::prime_subgroup_generator(), *g2),
+            );
+        }
+    }
+}
+
+type Pair = (G1Affine, G2Affine);
+
+pub fn pairing_check(lhs: Pair, rhs: Pair) {
+    assert_eq!(
+        Bls12_381::pairing(lhs.0, lhs.1),
+        Bls12_381::pairing(rhs.0, rhs.1)
+    );
 }
 
 #[cfg(test)]
@@ -262,7 +313,18 @@ pub mod test {
     use super::*;
     use ark_bls12_381::{G1Affine, G2Affine};
     use ark_ec::AffineCurve;
+    use ark_ff::UniformRand;
     use proptest::proptest;
+
+    #[test]
+    fn verify() {
+        let mut transcript = Transcript::new(128, 65);
+        let mut contrib = Contribution::new(128, 65);
+        contrib.verify(&transcript);
+        let mut rng = rand::thread_rng();
+        contrib.add_tau(&Fr::rand(&mut rng));
+        contrib.verify(&transcript);
+    }
 }
 
 #[cfg(feature = "bench")]
@@ -280,6 +342,7 @@ pub mod bench {
     pub fn group(criterion: &mut Criterion) {
         bench_pow_tau(criterion);
         bench_add_tau(criterion);
+        bench_verify(criterion);
     }
 
     fn bench_pow_tau(criterion: &mut Criterion) {
@@ -299,6 +362,16 @@ pub mod bench {
                 |tau| contrib.add_tau(&tau),
                 BatchSize::SmallInput,
             );
+        });
+    }
+
+    fn bench_verify(criterion: &mut Criterion) {
+        criterion.bench_function("contribution/verify", move |bencher| {
+            let mut transcript = Transcript::new(32768, 65);
+            let mut contrib = Contribution::new(32768, 65);
+            let mut rng = rand::thread_rng();
+            contrib.add_tau(&Fr::rand(&mut rng));
+            bencher.iter(|| contrib.verify(&transcript));
         });
     }
 }
