@@ -1046,6 +1046,8 @@ dependencies = [
  "once_cell",
  "prometheus",
  "proptest",
+ "rand 0.8.5",
+ "rayon",
  "serde",
  "serde_json",
  "thiserror",

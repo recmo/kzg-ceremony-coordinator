@@ -2,9 +2,10 @@
 #![warn(clippy::all, clippy::pedantic, clippy::cargo, clippy::nursery)]
 
 mod contribution;
+mod pairing_check;
 mod parse_g;
 
-use crate::{contribution::Contributions, parse_g::parse_g};
+use crate::{contribution::ContributionsJson, parse_g::parse_g};
 use ark_bls12_381::{Fq, FqParameters, G1Affine, G2Affine};
 use axum::{
     routing::{get, post},
@@ -40,33 +41,17 @@ pub async fn main(options: Options) -> EyreResult<()> {
         .route("/contribution/complete", post(|| async { "Hello, World!" }))
         .route("/contribution/abort", post(|| async { "Hello, World!" }));
 
-    // Load schema
-    let schema = serde_json::from_str(include_str!("../specs/contributionSchema.json")).unwrap();
-    let mut scope = json_schema::Scope::new();
-    let schema = scope.compile_and_return(schema, false).unwrap();
-
     // Load initial contribution
     info!("Reading initial contribution.");
     let initial = serde_json::from_str(include_str!("../specs/initialContribution.json")).unwrap();
-    let validation = schema.validate(&initial);
-    if !validation.is_strictly_valid() {
-        for error in validation.errors {
-            error!("{}", error);
-        }
-        for missing in validation.missing {
-            error!("Missing {}", missing);
-        }
-        // TODO bail!("Initial contribution is not valid.");
-    }
-    info!("Initial contribution is json-schema valid.");
 
     info!("Parsing initial contribution.");
-    let initial: Contributions = serde_json::from_value(initial)?;
+    let initial: ContributionsJson = serde_json::from_value(initial)?;
     info!("Parsing initial contribution done.");
 
-    info!("Validating initial contribution.");
-    initial.validate()?;
-    info!("Validating initial contribution done.");
+    info!("Parsing initial contribution.");
+    let contributions = initial.parse()?;
+    info!("Parsing initial contribution done.");
 
     // Run the server
     let (addr, prefix) = parse_url(&options.server)?;
@@ -156,6 +141,8 @@ pub mod bench {
         bench_example_proptest(criterion);
         bench_example_async(criterion);
         parse_g::bench::group(criterion);
+        contribution::bench::group(criterion);
+        pairing_check::bench::group(criterion);
     }
 
     /// Constructs an executor for async tests

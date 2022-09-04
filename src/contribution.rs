@@ -1,19 +1,42 @@
 use crate::parse_g::{parse_g, ParseError};
-use ark_bls12_381::{g1, g2};
+use ark_bls12_381::{g1, g2, Fr, G1Affine, G2Affine};
+use ark_ec::{AffineCurve, ProjectiveCurve};
+use ark_ff::{One, Zero};
+use once_cell::sync::Lazy;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_json::{self};
+use std::cmp::max;
 use thiserror::Error;
+use tracing::error;
+use valico::json_schema::{Schema, Scope};
 
 const SIZES: [(usize, usize); 4] = [(4096, 65), (8192, 65), (16384, 65), (32768, 65)];
 
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Contributions {
-    pub sub_contributions: Vec<Contribution>,
+// static SCHEMA: Lazy<Mutex<Schema>> = Lazy::new(|| {
+//     // Load schema
+//     let schema =
+// serde_json::from_str(include_str!("../specs/contributionSchema.json")).
+// unwrap();     let schema = valico::schema::compile(schema).unwrap();
+//     schema
+// });
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Contribution {
+    pub pubkey:    G2Affine,
+    pub g1_powers: Vec<G1Affine>,
+    pub g2_powers: Vec<G2Affine>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Contribution {
+pub struct ContributionsJson {
+    pub sub_contributions: Vec<ContributionJson>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContributionJson {
     pub num_g1_powers: usize,
     pub num_g2_powers: usize,
     pub powers_of_tau: PowersOfTau,
@@ -53,17 +76,34 @@ pub enum ContributionError {
     InvalidPubKey(#[source] ParseError),
 }
 
-impl Contributions {
+impl ContributionsJson {
     pub fn initial() -> Self {
         Self {
             sub_contributions: SIZES
                 .iter()
-                .map(|(num_g1, num_g2)| Contribution::initial(*num_g1, *num_g2))
+                .map(|(num_g1, num_g2)| ContributionJson::initial(*num_g1, *num_g2))
                 .collect(),
         }
     }
 
-    pub fn validate(&self) -> Result<(), ContributionsError> {
+    pub fn from_json(json: &str) -> Result<Self, ContributionsError> {
+        // let json = serde_json::from_str(json)?;
+        // let validation = schema.validate(&initial);
+        // if !validation.is_strictly_valid() {
+        //     for error in validation.errors {
+        //         error!("{}", error);
+        //     }
+        //     for missing in validation.missing {
+        //         error!("Missing {}", missing);
+        //     }
+        //     // TODO bail!("Initial contribution is not valid.");
+        // }
+        // info!("Initial contribution is json-schema valid.");
+        // TODO:
+        todo!()
+    }
+
+    pub fn parse(&self) -> Result<Vec<Contribution>, ContributionsError> {
         if self.sub_contributions.len() != SIZES.len() {
             return Err(ContributionsError::InvalidContributionCount(
                 4,
@@ -92,18 +132,17 @@ impl Contributions {
             .map(|(i, result)| result.map_err(|e| ContributionsError::InvalidContribution(i, e)))
             .collect::<Result<_, _>>()?;
         self.sub_contributions
-            .iter()
+            .par_iter()
             .enumerate()
             .map(|(i, c)| {
-                c.validate()
+                c.parse()
                     .map_err(|e| ContributionsError::InvalidContribution(i, e))
             })
-            .collect::<Result<_, _>>()?;
-        Ok(())
+            .collect::<Result<Vec<_>, _>>()
     }
 }
 
-impl Contribution {
+impl ContributionJson {
     pub fn initial(num_g1_powers: usize, num_g2_powers: usize) -> Self {
         Self {
             num_g1_powers,
@@ -113,7 +152,7 @@ impl Contribution {
         }
     }
 
-    pub fn validate(&self) -> Result<(), ContributionError> {
+    pub fn parse(&self) -> Result<Contribution, ContributionError> {
         if self.powers_of_tau.g1_powers.len() != self.num_g1_powers {
             return Err(ContributionError::InconsistentNumG1Powers(
                 self.num_g1_powers,
@@ -126,30 +165,34 @@ impl Contribution {
                 self.powers_of_tau.g2_powers.len(),
             ));
         }
-        self.powers_of_tau
+        let g1_powers = self
+            .powers_of_tau
             .g1_powers
-            .iter()
+            .par_iter()
             .enumerate()
             .map(|(i, hex)| {
-                parse_g::<g1::Parameters>(hex)
-                    .map_err(|e| ContributionError::InvalidG1Power(i, e))
-                    .map(|_| ())
+                parse_g::<g1::Parameters>(hex).map_err(|e| ContributionError::InvalidG1Power(i, e))
             })
-            .collect::<Result<_, _>>()?;
-        self.powers_of_tau
+            .collect::<Result<Vec<_>, _>>()?;
+        let g2_powers = self
+            .powers_of_tau
             .g2_powers
-            .iter()
+            .par_iter()
             .enumerate()
             .map(|(i, hex)| {
-                parse_g::<g2::Parameters>(hex)
-                    .map_err(|e| ContributionError::InvalidG2Power(i, e))
-                    .map(|_| ())
+                parse_g::<g2::Parameters>(hex).map_err(|e| ContributionError::InvalidG2Power(i, e))
             })
-            .collect::<Result<_, _>>()?;
-        if let Some(pubkey) = &self.pot_pubkey {
-            parse_g::<g2::Parameters>(pubkey).map_err(|e| ContributionError::InvalidPubKey(e))?;
-        }
-        Ok(())
+            .collect::<Result<Vec<_>, _>>()?;
+        let pubkey = if let Some(pubkey) = &self.pot_pubkey {
+            parse_g::<g2::Parameters>(pubkey).map_err(|e| ContributionError::InvalidPubKey(e))?
+        } else {
+            G2Affine::zero()
+        };
+        Ok(Contribution {
+            pubkey,
+            g1_powers,
+            g2_powers,
+        })
     }
 }
 
@@ -162,8 +205,91 @@ impl PowersOfTau {
     }
 }
 
-impl Default for Contributions {
-    fn default() -> Self {
-        Self::initial()
+impl Contribution {
+    pub fn new(num_g1: usize, num_g2: usize) -> Self {
+        Self {
+            pubkey:    G2Affine::prime_subgroup_generator(),
+            g1_powers: vec![G1Affine::prime_subgroup_generator(); num_g1],
+            g2_powers: vec![G2Affine::prime_subgroup_generator(); num_g2],
+        }
+    }
+
+    pub fn pairing_checks(&self, previous: &Self) {}
+
+    pub fn add_tau(&mut self, tau: Fr) {
+        let n_tau = max(self.g1_powers.len(), self.g2_powers.len());
+        let powers = Self::pow_table(tau, n_tau);
+        self.mul_g1(&powers[0..self.g1_powers.len()]);
+        self.mul_g2(&powers[0..self.g2_powers.len()]);
+        self.pubkey = self.pubkey.mul(tau).into_affine();
+    }
+
+    fn pow_table(tau: Fr, n: usize) -> Vec<Fr> {
+        let mut powers = Vec::with_capacity(n);
+        let mut pow_tau = Fr::one();
+        powers.push(pow_tau);
+        for _ in 1..n {
+            pow_tau *= tau;
+            powers.push(pow_tau);
+        }
+        powers
+    }
+
+    fn mul_g1(&mut self, scalars: &[Fr]) {
+        for (c, pow_tau) in self.g1_powers.iter_mut().zip(scalars.iter()) {
+            *c = c.mul(*pow_tau).into_affine();
+        }
+    }
+
+    fn mul_g2(&mut self, scalars: &[Fr]) {
+        for (c, pow_tau) in self.g2_powers.iter_mut().zip(scalars.iter()) {
+            *c = c.mul(*pow_tau).into_affine();
+        }
+    }
+}
+
+#[cfg(test)]
+pub mod test {
+    use super::*;
+    use ark_bls12_381::{G1Affine, G2Affine};
+    use ark_ec::AffineCurve;
+    use proptest::proptest;
+}
+
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+pub mod bench {
+    use super::*;
+    use ark_bls12_381::{g1, g2};
+    use ark_ff::UniformRand;
+    use criterion::{black_box, BatchSize, Criterion};
+    use proptest::{
+        strategy::{Strategy, ValueTree},
+        test_runner::TestRunner,
+    };
+
+    pub fn group(criterion: &mut Criterion) {
+        bench_pow_tau(criterion);
+        bench_add_tau(criterion);
+    }
+
+    fn bench_pow_tau(criterion: &mut Criterion) {
+        criterion.bench_function("contribution/pow_tau", move |bencher| {
+            let mut rng = rand::thread_rng();
+            let tau = Fr::rand(&mut rng);
+            bencher.iter(|| black_box(Contribution::pow_table(black_box(tau), 32768)));
+        });
+    }
+
+    fn bench_add_tau(criterion: &mut Criterion) {
+        criterion.bench_function("contribution/add_tau", move |bencher| {
+            let mut contrib = Contribution::new(32768, 65);
+            let mut rng = rand::thread_rng();
+            bencher.iter_batched(
+                || Fr::rand(&mut rng),
+                |tau| contrib.add_tau(tau),
+                BatchSize::SmallInput,
+            );
+        });
     }
 }

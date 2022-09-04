@@ -32,6 +32,7 @@ cargo test -- -Z unstable-options --report-time --show-output
 * [ ] Group element serializer.
 * [ ] Contribution deserializer.
 * [ ] Use &str in contribution deserializer.
+* [ ] Move validation to shutdown-interruptable background compute task.
 * [ ] Validate either all or none potPubkeys.
 * [ ] Validate non-trivial potPubkeys.
 * [ ] Validate distinct potPubkeys in subContributions.
