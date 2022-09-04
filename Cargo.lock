@@ -94,6 +94,7 @@ dependencies = [
  "ark-std",
  "derivative",
  "num-traits",
+ "rayon",
  "zeroize",
 ]
 
@@ -111,6 +112,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "paste",
+ "rayon",
  "rustc_version",
  "zeroize",
 ]
@@ -155,6 +157,7 @@ checksum = "1df2c09229cbc5a028b1d70e00fdb2acee28b1055dfb5ca73eea49c5a25c4e7c"
 dependencies = [
  "num-traits",
  "rand 0.8.5",
+ "rayon",
 ]
 
 [[package]]
