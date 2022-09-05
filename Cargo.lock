@@ -372,9 +372,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.19"
+version = "3.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68d43934757334b5c0519ff882e1ab9647ac0258b47c24c4f490d78e42697fd5"
+checksum = "23b71c3ce99b7611011217b366d923f1d0a7e07a92bb2dbf1e84508c673ca3bd"
 dependencies = [
  "atty",
  "bitflags",
@@ -419,7 +419,7 @@ checksum = "912df25ef5f8ac1cc683bcbf4e6a67d38f6eed34a2fb2d3c4b7480852dffee13"
 dependencies = [
  "ansi_term",
  "chrono",
- "clap 3.2.19",
+ "clap 3.2.20",
  "color-eyre",
  "eyre",
  "futures",
@@ -1039,7 +1039,7 @@ dependencies = [
  "ark-ec",
  "ark-ff",
  "axum",
- "clap 3.2.19",
+ "clap 3.2.20",
  "cli-batteries",
  "criterion",
  "eyre",
