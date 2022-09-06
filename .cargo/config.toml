@@ -1,5 +1,5 @@
 [alias]
-criterion = "bench --bench=criterion --features=bench,proptest"
+criterion = "bench --bench=criterion --features=bench"
 
 [build]
 # Enable tokio-console support

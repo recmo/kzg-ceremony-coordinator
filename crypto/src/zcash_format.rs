@@ -126,7 +126,6 @@ pub mod test {
     use super::*;
     use ark_bls12_381::{G1Affine, G2Affine};
     use ark_ec::AffineCurve;
-    use proptest::proptest;
 
     #[test]
     fn test_parse_g1() {
@@ -146,11 +145,7 @@ pub mod test {
 pub mod bench {
     use super::*;
     use ark_bls12_381::{g1, g2};
-    use criterion::{black_box, BatchSize, Criterion};
-    use proptest::{
-        strategy::{Strategy, ValueTree},
-        test_runner::TestRunner,
-    };
+    use criterion::{black_box, Criterion};
 
     pub fn group(criterion: &mut Criterion) {
         bench_parse_g1(criterion);

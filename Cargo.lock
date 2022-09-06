@@ -1046,6 +1046,7 @@ dependencies = [
  "futures",
  "hex",
  "hex-literal",
+ "kzg-ceremony-crypto",
  "once_cell",
  "prometheus",
  "proptest",
@@ -1064,6 +1065,26 @@ dependencies = [
  "tracing-test",
  "url",
  "valico",
+ "zeroize",
+]
+
+[[package]]
+name = "kzg-ceremony-crypto"
+version = "0.1.0"
+dependencies = [
+ "ark-bls12-381",
+ "ark-ec",
+ "ark-ff",
+ "criterion",
+ "hex",
+ "proptest",
+ "rand 0.8.5",
+ "rayon",
+ "ruint",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tracing",
  "zeroize",
 ]
 

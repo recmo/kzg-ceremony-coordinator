@@ -1,72 +1,8 @@
-[package]
-name = "kzg-ceremony-coordinator"
-version = "0.1.0"
-authors = ["Remco Bloemen <remco@wicked.ventures>"]
-edition = "2021"
-build = "build.rs"
-homepage = "https://github.com/recmo/kzg-ceremony-coordinator"
-repository = "https://github.com/recmo/kzg-ceremony-coordinator"
-description = "Implementation of the ethereum kzg cermony spec coordinator"
-keywords = ["cryptography"]
-categories = ["cryptography::cryptocurrencies"]
-readme = "Readme.md"
-license-file = "mit-license.md"
-
-[features]
-default = [ ]
-bench = [ "criterion", "proptest" ]
-mimalloc = [ "cli-batteries/mimalloc" ]
-
-[[bench]]
-name = "criterion"
-harness = false
-path = "criterion.rs"
-required-features = [ "bench", "proptest" ]
-
-[dependencies]
-# Build dependencies required for `cargo criterion`, so really more `dev-deps`.
-proptest = { version = "1.0", optional = true }
-criterion = { version = "0.3", optional = true, features = [ "async_tokio" ] }
-
-# Dependencies
-cli-batteries = { version = "0.3.3", features = [ "signals", "prometheus", "metered-allocator", "otlp" ] }
-eyre = "0.6"
-futures = "0.3"
-once_cell = "1.8"
-prometheus = "0.13"
-serde = { version = "1.0", features = [ "derive" ] }
-serde_json = "1.0"
-clap = { version = "3.2", features = [ "derive" ] }
-thiserror = "1.0"
-tokio = { version = "1.17", features = [ "signal", "macros", "rt", "sync", "time", "rt-multi-thread", "tracing" ] }
-tracing = "0.1"
-tracing-futures = "0.2"
-url = "2.2"
-axum = "0.5.15"
-tower = "0.4.13"
-tower-http = { version = "0.3.4", features = ["trace"] }
-valico = "3.6.1"
-ark-ff = { version = "0.3.0", features = ["asm", "parallel"] }
-ark-ec = { version = "0.3.0", features = ["parallel"] }
-ark-bls12-381 = "0.3.0"
-hex = "0.4.3"
-rayon = "1.5.3"
-rand = "0.8.5"
-zeroize = "1.5.7"
-ruint = { version = "1.3.0", features = ["ark-ff"] }
-
-
-[dev-dependencies]
-cli-batteries = { version = "0.3.1", features = [ "mock-shutdown" ] }
-proptest = { version = "1.0" }
-tracing-test = "0.2"
-tracing-subscriber = "0.3.11"
-hex = "0.4.3"
-hex-literal = "0.3"
-ruint = { version = "1.3.0", features = ["ark-ff", "proptest"] }
-
-[build-dependencies]
-cli-batteries = "0.3.1"
+[workspace]
+members = [
+    "crypto",
+    "coordinator",
+]
 
 [profile.release]
 codegen-units = 1

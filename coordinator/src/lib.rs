@@ -2,16 +2,7 @@
 #![warn(clippy::all, clippy::pedantic, clippy::cargo, clippy::nursery)]
 #![cfg_attr(any(test, feature = "bench"), allow(clippy::wildcard_imports))]
 
-mod contribution;
-mod pairing_check;
-mod parse_g;
-mod subgroup_check;
-
-use crate::{
-    contribution::{Contribution, ContributionsJson, Transcript},
-    parse_g::parse_g,
-};
-use ark_bls12_381::{Fq, FqParameters, Fr, G1Affine, G2Affine};
+use ark_bls12_381::Fr;
 use ark_ff::UniformRand;
 use axum::{
     routing::{get, post},
@@ -20,15 +11,11 @@ use axum::{
 use clap::Parser;
 use cli_batteries::await_shutdown;
 use eyre::{bail, ensure, Result as EyreResult, Result};
-use hex::FromHexError;
+use kzg_ceremony_crypto::{Contribution, ContributionsError, Transcript};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use thiserror::Error;
 use tower_http::trace::TraceLayer;
-use tracing::{error, info, info_span};
+use tracing::{info, info_span};
 use url::{Host, Url};
-use valico::json_schema;
-
-pub use crate::subgroup_check::{g1_subgroup_check, g2_subgroup_check};
 
 #[derive(Clone, Debug, PartialEq, Parser)]
 pub struct Options {
@@ -49,19 +36,7 @@ pub async fn main(options: Options) -> EyreResult<()> {
         .route("/contribution/complete", post(|| async { "Hello, World!" }))
         .route("/contribution/abort", post(|| async { "Hello, World!" }));
 
-    // Load initial contribution
-    info!("Reading initial contribution.");
-    let initial = serde_json::from_str(include_str!("../specs/initialContribution.json")).unwrap();
-
-    info!("Parsing initial contribution.");
-    let initial: ContributionsJson = serde_json::from_value(initial)?;
-    info!("Parsing initial contribution done.");
-
-    info!("Parsing initial contribution.");
-    let contributions = initial.parse()?;
-    info!("Parsing initial contribution done.");
-
-    let transcripts = crate::contribution::SIZES
+    let transcripts = kzg_ceremony_crypto::SIZES
         .iter()
         .map(|(n1, n2)| Transcript::new(*n1, *n2))
         .collect::<Vec<_>>();
@@ -127,7 +102,7 @@ fn parse_url(url: &Url) -> Result<(SocketAddr, &str)> {
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use ark_bls12_381::{FrParameters, G1Affine};
+    use ark_bls12_381::{FrParameters, G1Affine, G2Affine};
     use ark_ec::{AffineCurve, ProjectiveCurve};
     use ark_ff::{BigInteger256, FpParameters, PrimeField};
     use proptest::{arbitrary::any, proptest, strategy::Strategy};
@@ -192,6 +167,7 @@ pub mod test {
 #[doc(hidden)]
 pub mod bench {
     use super::*;
+    use ark_bls12_381::{G1Affine, G2Affine};
     use ark_ec::{AffineCurve, ProjectiveCurve};
     use criterion::{black_box, BatchSize, Criterion};
     use proptest::{
@@ -221,10 +197,6 @@ pub mod bench {
     pub fn group(criterion: &mut Criterion) {
         bench_example_proptest(criterion);
         bench_example_async(criterion);
-        subgroup_check::bench::group(criterion);
-        parse_g::bench::group(criterion);
-        contribution::bench::group(criterion);
-        pairing_check::bench::group(criterion);
     }
 
     /// Constructs an executor for async tests

@@ -1,29 +1,13 @@
-use crate::{
-    g1_subgroup_check, g2_subgroup_check,
-    parse_g::{parse_g, ParseError},
-};
+use crate::{g1_subgroup_check, g2_subgroup_check, parse_g, ParseError};
 use ark_bls12_381::{g1, g2, Bls12_381, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
 use ark_ec::{msm::VariableBaseMSM, AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::{One, PrimeField, UniformRand, Zero};
-use once_cell::sync::Lazy;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_json::{self};
 use std::{cmp::max, iter};
 use thiserror::Error;
 use tracing::{error, instrument};
-use valico::json_schema::{Schema, Scope};
 use zeroize::Zeroizing;
-
-pub const SIZES: [(usize, usize); 4] = [(4096, 65), (8192, 65), (16384, 65), (32768, 65)];
-
-// static SCHEMA: Lazy<Mutex<Schema>> = Lazy::new(|| {
-//     // Load schema
-//     let schema =
-// serde_json::from_str(include_str!("../specs/contributionSchema.json")).
-// unwrap();     let schema = valico::schema::compile(schema).unwrap();
-//     schema
-// });
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Transcript {
@@ -91,7 +75,7 @@ pub enum ContributionError {
 impl ContributionsJson {
     pub fn initial() -> Self {
         Self {
-            sub_contributions: SIZES
+            sub_contributions: crate::SIZES
                 .iter()
                 .map(|(num_g1, num_g2)| ContributionJson::initial(*num_g1, *num_g2))
                 .collect(),
@@ -116,7 +100,7 @@ impl ContributionsJson {
     }
 
     pub fn parse(&self) -> Result<Vec<Contribution>, ContributionsError> {
-        if self.sub_contributions.len() != SIZES.len() {
+        if self.sub_contributions.len() != crate::SIZES.len() {
             return Err(ContributionsError::InvalidContributionCount(
                 4,
                 self.sub_contributions.len(),
@@ -124,7 +108,7 @@ impl ContributionsJson {
         }
         self.sub_contributions
             .iter()
-            .zip(SIZES.iter())
+            .zip(crate::SIZES.iter())
             .map(|(c, (num_g1, num_g2))| {
                 if c.num_g1_powers != *num_g1 {
                     return Err(ContributionError::UnexpectedNumG1Powers(
@@ -141,8 +125,9 @@ impl ContributionsJson {
                 Ok(())
             })
             .enumerate()
-            .map(|(i, result)| result.map_err(|e| ContributionsError::InvalidContribution(i, e)))
-            .collect::<Result<_, _>>()?;
+            .try_for_each(|(i, result)| {
+                result.map_err(|e| ContributionsError::InvalidContribution(i, e))
+            })?;
         self.sub_contributions
             .par_iter()
             .enumerate()
@@ -353,10 +338,7 @@ fn random_factors(n: usize) -> (Vec<<Fr as PrimeField>::BigInt>, Fr) {
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use ark_bls12_381::{G1Affine, G2Affine};
-    use ark_ec::AffineCurve;
     use ark_ff::UniformRand;
-    use proptest::proptest;
 
     #[test]
     fn verify() {
@@ -373,13 +355,8 @@ pub mod test {
 #[doc(hidden)]
 pub mod bench {
     use super::*;
-    use ark_bls12_381::{g1, g2};
     use ark_ff::UniformRand;
     use criterion::{black_box, BatchSize, BenchmarkId, Criterion};
-    use proptest::{
-        strategy::{Strategy, ValueTree},
-        test_runner::TestRunner,
-    };
 
     pub fn group(criterion: &mut Criterion) {
         bench_pow_tau(criterion);

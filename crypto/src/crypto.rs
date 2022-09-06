@@ -1,13 +1,13 @@
 /// Optimized subgroup checks.
 ///
-/// Taken from latest (unreleased) arkworks:
+/// Endomorphism and subgroup checks taken from latest (unreleased) arkworks-rs:
 /// See [bls12_381/src/curves/g1.rs](https://github.com/arkworks-rs/curves/blob/dc555882cd867b1e5b6fb16f840ebb0b336136d1/bls12_381/src/curves/g1.rs#L48)
 /// See [bls12_381/src/curves/g2.rs](https://github.com/arkworks-rs/curves/blob/dc555882cd867b1e5b6fb16f840ebb0b336136d1/bls12_381/src/curves/g2.rs#L112)
 use ark_bls12_381::{Fq, Fr, G1Affine, G1Projective, G2Projective, Parameters};
 use ark_bls12_381::{Fq2, G2Affine};
 use ark_ec::{bls12::Bls12Parameters, AffineCurve, ProjectiveCurve};
-use ark_ff::{field_new, BigInteger384, Field, PrimeField, UniformRand, Zero};
-use std::ops::{Add, AddAssign, Neg};
+use ark_ff::{field_new, Field, PrimeField, Zero};
+use std::ops::{AddAssign, Neg};
 
 /// is_in_correct_subgroup_assuming_on_curve
 #[inline]
@@ -43,12 +43,6 @@ pub fn g2_subgroup_check(point: &G2Affine) -> bool {
     let p_times_point = g2_endomorphism(point);
 
     x_times_point.eq(&p_times_point)
-}
-
-/// Implements scalar-point multiplication using Galbraith-Lin-Scott
-/// See <https://www.iacr.org/archive/eurocrypt2009/54790519/54790519.pdf>
-pub fn g2_mult_gls(point: G2Affine, scalar: Fr) -> G2Affine {
-    todo!()
 }
 
 #[inline]
@@ -142,9 +136,10 @@ pub fn g2_endomorphism(p: &G2Affine) -> G2Affine {
     res
 }
 
-const G1_LAMBDA: u64 = 0xd201000000010000;
-const G1_LAMBDA_2: [u64; 2] = [0x0000000100000000, 0xac45a4010001a402];
+const G1_LAMBDA: u64 = 0xd201_0000_0001_0000;
+const G1_LAMBDA_2: [u64; 2] = [0x0000_0001_0000_0000, 0xac45_a401_0001_a402];
 
+#[inline]
 fn g1_split(tau: Fr) -> (u128, u128) {
     let mut tau = tau.into_repr().0;
     let mut divisor = G1_LAMBDA_2;
@@ -191,9 +186,8 @@ fn g1_mul_glv(p: &G1Affine, tau: Fr) -> G1Projective {
 pub mod test {
     use super::*;
     use crate::test::{arb_fr, arb_g1, arb_g2};
-    use ark_bls12_381::{G1Affine, G2Affine};
     use ark_ec::AffineCurve;
-    use ark_ff::{BigInteger256, PrimeField, UniformRand};
+    use ark_ff::{BigInteger256, PrimeField};
     use proptest::proptest;
 
     #[test]
@@ -260,7 +254,6 @@ pub mod test {
 pub mod bench {
     use super::*;
     use crate::bench::{rand_fr, rand_g1, rand_g2};
-    use ark_bls12_381::{g1, g2};
     use criterion::{black_box, BatchSize, Criterion};
 
     pub fn group(criterion: &mut Criterion) {
