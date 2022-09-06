@@ -1847,6 +1847,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "12231d86b9fff1966722de5943b78c5f7f8869f8dbe487d624f6d5eee851d085"
 dependencies = [
  "ark-ff",
+ "proptest",
  "ruint-macro",
  "rustc_version 0.4.0",
  "thiserror",

@@ -1,5 +1,6 @@
 #![doc = include_str!("../Readme.md")]
 #![warn(clippy::all, clippy::pedantic, clippy::cargo, clippy::nursery)]
+#![cfg_attr(any(test, feature = "bench"), allow(clippy::wildcard_imports))]
 
 mod contribution;
 mod pairing_check;
@@ -126,15 +127,20 @@ fn parse_url(url: &Url) -> Result<(SocketAddr, &str)> {
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use ark_bls12_381::G1Affine;
+    use ark_bls12_381::{FrParameters, G1Affine};
     use ark_ec::{AffineCurve, ProjectiveCurve};
     use ark_ff::{BigInteger256, PrimeField};
     use proptest::{arbitrary::any, proptest, strategy::Strategy};
+    use ruint::aliases::U256;
     use tracing::{error, warn};
     use tracing_test::traced_test;
+    use ark_ff::FpParameters;
 
     pub fn arb_fr() -> impl Strategy<Value = Fr> {
-        any::<[u64; 4]>().prop_map(|v| Fr::from(BigInteger256(v)))
+        any::<U256>().prop_map(|mut n| {
+            n %= U256::from(FrParameters::MODULUS);
+            Fr::from_repr(BigInteger256::from(n)).unwrap()
+        })
     }
 
     pub fn arb_g1() -> impl Strategy<Value = G1Affine> {
