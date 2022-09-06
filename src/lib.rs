@@ -183,6 +183,7 @@ pub mod bench {
     pub fn group(criterion: &mut Criterion) {
         bench_example_proptest(criterion);
         bench_example_async(criterion);
+        subgroup_check::bench::group(criterion);
         parse_g::bench::group(criterion);
         contribution::bench::group(criterion);
         pairing_check::bench::group(criterion);

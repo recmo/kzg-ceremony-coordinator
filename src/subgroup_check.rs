@@ -6,8 +6,9 @@
 use ark_bls12_381::{Fq, Fr, G1Affine, G1Projective, G2Projective, Parameters};
 use ark_bls12_381::{Fq2, G2Affine};
 use ark_ec::{bls12::Bls12Parameters, AffineCurve, ProjectiveCurve};
-use ark_ff::{field_new, BigInteger384, Field, Zero};
-use std::ops::Neg;
+use ark_ff::{field_new, BigInteger384, Field, PrimeField, Zero};
+use std::ops::{Add, Neg};
+use ark_ff::UniformRand;
 
 /// is_in_correct_subgroup_assuming_on_curve
 #[inline]
@@ -43,11 +44,6 @@ pub fn g2_subgroup_check(point: &G2Affine) -> bool {
     let p_times_point = g2_endomorphism(point);
 
     x_times_point.eq(&p_times_point)
-}
-
-/// Implements scalar-point multiplication using Gallant-Lambert-Vanstone (GLV).
-pub fn g1_mult_glv(point: G1Affine, scalar: Fr) -> G1Affine {
-    todo!()
 }
 
 /// Implements scalar-point multiplication using Galbraith-Lin-Scott
@@ -150,28 +146,143 @@ pub fn g2_endomorphism(p: &G2Affine) -> G2Affine {
 const G1_LAMBDA: u64 = 0xd201000000010000;
 const G1_LAMBDA_2: [u64; 2] = [0x0000000100000000, 0xac45a4010001a402];
 
+fn g1_split(tau: Fr) -> (u128, u128) {
+    let mut tau = tau.into_repr().0;
+    let mut divisor = G1_LAMBDA_2;
+    ruint::algorithms::div_rem(&mut tau, &mut divisor);
+    let k0 = (divisor[0] as u128) | (divisor[1] as u128) << 64;
+    let k1 = (tau[0] as u128) | (tau[1] as u128) << 64;
+    (k0, k1)
+}
+
+/// Implements scalar-point multiplication using Gallant-Lambert-Vanstone (GLV).
+fn g1_mul_glv(p: &G1Affine, tau: Fr) -> G1Projective {
+    let (k0, k1) = g1_split(tau);
+
+    // Find first bit set
+    if k0 | k1 == 0 {
+        return G1Projective::zero();
+    }
+    let mut bit = 1_u128 << (127 - (k0 | k1).leading_zeros());
+
+    // Compute endomorphism
+    let q = g1_endomorphism(p).neg();
+
+    let mut res = G1Projective::zero();
+    loop {
+        if bit & k0 != 0 {
+            res.add_assign_mixed(p);
+        }
+        if bit & k1 != 0 {
+            res.add_assign_mixed(&q);
+        }
+        bit >>= 1;
+        if bit == 0 {
+            break;
+        }
+        res.double_in_place();
+    }
+    res
+}
+
 #[cfg(test)]
 pub mod test {
     use super::*;
     use ark_bls12_381::{G1Affine, G2Affine};
     use ark_ec::AffineCurve;
-    use ark_ff::UniformRand;
+    use ark_ff::{BigInteger256, PrimeField, UniformRand};
     use proptest::proptest;
 
-    fn rand_point() -> G1Affine {
+    fn rand_fr() -> Fr {
         let mut rng = rand::thread_rng();
+        Fr::rand(&mut rng)
+    }
+
+    fn rand_g1() -> G1Affine {
         G1Affine::prime_subgroup_generator()
-            .mul(Fr::rand(&mut rng))
+            .mul(rand_fr())
             .into_affine()
     }
 
     #[test]
     fn test_g1_endomorphism() {
-        let x = rand_point();
+        let x = rand_g1();
 
-        // let expected = g1_mul_bigint(&x, &[G1_LAMBDA]).into_affine();
         let expected = g1_mul_bigint(&x, &G1_LAMBDA_2).neg().into_affine();
         let value = g1_endomorphism(&x);
         assert_eq!(value, expected);
+    }
+
+    #[test]
+    fn test_g1_split() {
+        let x = rand_fr();
+        let (k0, k1) = g1_split(x);
+        let lambda = Fr::from_repr(BigInteger256([G1_LAMBDA_2[0], G1_LAMBDA_2[1], 0, 0])).unwrap();
+        let value = Fr::from(k0) + Fr::from(k1) * lambda;
+        assert_eq!(value, x);
+    }
+
+    #[test]
+    fn test_g1_mul_glv() {
+        let p = rand_g1();
+        let s = rand_fr();
+        let expected = p.mul(s);
+        let value = g1_mul_glv(&p, s);
+        assert_eq!(value, expected);
+    }
+}
+
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+pub mod bench {
+    use super::*;
+    use ark_bls12_381::{g1, g2};
+    use criterion::{black_box, BatchSize, Criterion};
+    use proptest::{
+        strategy::{Strategy, ValueTree},
+        test_runner::TestRunner,
+    };
+
+    fn rand_fr() -> Fr {
+        let mut rng = rand::thread_rng();
+        Fr::rand(&mut rng)
+    }
+
+    fn rand_g1() -> G1Affine {
+        G1Affine::prime_subgroup_generator()
+            .mul(rand_fr())
+            .into_affine()
+    }
+
+    pub fn group(criterion: &mut Criterion) {
+        bench_g1_mul(criterion);
+        bench_g1_split(criterion);
+        bench_g1_mul_glv(criterion);
+    }
+
+    fn bench_g1_mul(criterion: &mut Criterion) {
+        criterion.bench_function("g1_mul", move |bencher| {
+            bencher.iter_batched(
+                || (rand_g1(), rand_fr()),
+                |(p, s)| black_box(p.mul(black_box(s))),
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    fn bench_g1_split(criterion: &mut Criterion) {
+        criterion.bench_function("g1_split", move |bencher| {
+            bencher.iter_batched(rand_fr, |s| black_box(g1_split(s)), BatchSize::SmallInput);
+        });
+    }
+
+    fn bench_g1_mul_glv(criterion: &mut Criterion) {
+        criterion.bench_function("g1_mul_glv", move |bencher| {
+            bencher.iter_batched(
+                || (rand_g1(), rand_fr()),
+                |(p, s)| black_box(g1_mul_glv(black_box(&p), black_box(s))),
+                BatchSize::SmallInput,
+            );
+        });
     }
 }

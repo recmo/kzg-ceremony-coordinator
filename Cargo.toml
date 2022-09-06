@@ -53,6 +53,7 @@ hex = "0.4.3"
 rayon = "1.5.3"
 rand = "0.8.5"
 zeroize = "1.5.7"
+ruint = { version = "1.3.0", features = ["ark-ff"] }
 
 
 [dev-dependencies]
