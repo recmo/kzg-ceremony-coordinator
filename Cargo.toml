@@ -78,3 +78,9 @@ strip = true
 # while having neglible impact on incremental build times.
 [profile.dev.package."*"]
 opt-level = 3
+
+[patch.crates-io]
+# ark-std = { git = 'https://github.com/arkworks-rs/std' }
+# ark-ff = { git = 'https://github.com/arkworks-rs/algebra' }
+# ark-ec = { git = 'https://github.com/arkworks-rs/algebra' }
+# ark-bls12-381 = { git = 'https://github.com/arkworks-rs/curves' }

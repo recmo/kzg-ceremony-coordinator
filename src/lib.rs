@@ -4,9 +4,14 @@
 mod contribution;
 mod pairing_check;
 mod parse_g;
+mod subgroup_check;
 
-use crate::{contribution::ContributionsJson, parse_g::parse_g};
-use ark_bls12_381::{Fq, FqParameters, G1Affine, G2Affine};
+use crate::{
+    contribution::{Contribution, ContributionsJson, Transcript},
+    parse_g::parse_g,
+};
+use ark_bls12_381::{Fq, FqParameters, Fr, G1Affine, G2Affine};
+use ark_ff::UniformRand;
 use axum::{
     routing::{get, post},
     Router, Server,
@@ -18,9 +23,11 @@ use hex::FromHexError;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use thiserror::Error;
 use tower_http::trace::TraceLayer;
-use tracing::{error, info};
+use tracing::{error, info, info_span};
 use url::{Host, Url};
 use valico::json_schema;
+
+pub use crate::subgroup_check::g1_subgroup_check;
 
 #[derive(Clone, Debug, PartialEq, Parser)]
 pub struct Options {
@@ -52,6 +59,42 @@ pub async fn main(options: Options) -> EyreResult<()> {
     info!("Parsing initial contribution.");
     let contributions = initial.parse()?;
     info!("Parsing initial contribution done.");
+
+    let transcripts = crate::contribution::SIZES
+        .iter()
+        .map(|(n1, n2)| Transcript::new(*n1, *n2))
+        .collect::<Vec<_>>();
+
+    let mut rng = rand::thread_rng();
+    let contributions = {
+        let span = info_span!("Generating contributions ");
+        let _guard = span.enter();
+        let contributions = transcripts
+            .iter()
+            .map(|t| {
+                let mut contribution = Contribution::new(t.g1_powers.len(), t.g2_powers.len());
+                contribution.add_tau(&Fr::rand(&mut rng));
+                contribution
+            })
+            .collect::<Vec<_>>();
+        contributions
+    };
+    {
+        let span = info_span!("Contributions subgroup check", n = contributions.len());
+        let _guard = span.enter();
+        contributions
+            .iter()
+            .for_each(|contribution| contribution.subgroup_check());
+    };
+
+    {
+        let span = info_span!("Verifying contributions");
+        let _guard = span.enter();
+        transcripts
+            .iter()
+            .zip(contributions.iter())
+            .for_each(|(transcript, contribution)| contribution.verify(&transcript));
+    };
 
     // Run the server
     let (addr, prefix) = parse_url(&options.server)?;

@@ -1,18 +1,19 @@
 use crate::parse_g::{parse_g, ParseError};
 use ark_bls12_381::{g1, g2, Bls12_381, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
 use ark_ec::{msm::VariableBaseMSM, AffineCurve, PairingEngine, ProjectiveCurve};
-use ark_ff::{One, UniformRand, Zero, PrimeField};
+use ark_ff::{One, PrimeField, UniformRand, Zero};
 use once_cell::sync::Lazy;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{self};
 use std::{cmp::max, iter};
 use thiserror::Error;
-use tracing::error;
+use tracing::{error, instrument};
 use valico::json_schema::{Schema, Scope};
 use zeroize::Zeroizing;
+use crate::g1_subgroup_check;
 
-const SIZES: [(usize, usize); 4] = [(4096, 65), (8192, 65), (16384, 65), (32768, 65)];
+pub const SIZES: [(usize, usize); 4] = [(4096, 65), (8192, 65), (16384, 65), (32768, 65)];
 
 // static SCHEMA: Lazy<Mutex<Schema>> = Lazy::new(|| {
 //     // Load schema
@@ -234,6 +235,18 @@ impl Contribution {
         }
     }
 
+    #[instrument(level = "info", skip_all, fields(n1=self.g1_powers.len(), n2=self.g2_powers.len()))]
+    pub fn subgroup_check(&self) {
+        assert!(self.pubkey.is_in_correct_subgroup_assuming_on_curve());
+        self.g1_powers
+            .par_iter()
+            .for_each(|point| assert!(g1_subgroup_check(point)));
+        self.g2_powers
+            .par_iter()
+            .for_each(|point| assert!(point.is_in_correct_subgroup_assuming_on_curve()));
+    }
+
+    #[instrument(level = "info", skip_all)]
     pub fn add_tau(&mut self, tau: &Fr) {
         let n_tau = max(self.g1_powers.len(), self.g2_powers.len());
         let powers = Self::pow_table(&tau, n_tau);
@@ -242,6 +255,7 @@ impl Contribution {
         self.pubkey = self.pubkey.mul(*tau).into_affine();
     }
 
+    #[instrument(level = "info", skip_all)]
     fn pow_table(tau: &Fr, n: usize) -> Zeroizing<Vec<Fr>> {
         let mut powers = Zeroizing::new(Vec::with_capacity(n));
         let mut pow_tau = Zeroizing::new(Fr::one());
@@ -253,6 +267,7 @@ impl Contribution {
         powers
     }
 
+    #[instrument(level = "info", skip_all)]
     fn mul_g1(&mut self, scalars: &[Fr]) {
         let projective = self
             .g1_powers
@@ -263,6 +278,7 @@ impl Contribution {
         self.g1_powers = G1Projective::batch_normalization_into_affine(&projective[..]);
     }
 
+    #[instrument(level = "info", skip_all)]
     fn mul_g2(&mut self, scalars: &[Fr]) {
         let projective = self
             .g2_powers
@@ -273,34 +289,42 @@ impl Contribution {
         self.g2_powers = G2Projective::batch_normalization_into_affine(&projective[..]);
     }
 
+    #[instrument(level = "info", skip_all)]
     pub fn verify(&self, transcript: &Transcript) {
-        // TODO: Turn into errors
         assert_eq!(self.g1_powers.len(), transcript.g1_powers.len());
         assert_eq!(self.g2_powers.len(), transcript.g2_powers.len());
+        self.verify_pubkey(transcript.products.last().unwrap());
+        self.verify_g1();
+        self.verify_g2();
+    }
 
-        // Verify g1_powers[0]
+    #[instrument(level = "info", skip_all)]
+    fn verify_pubkey(&self, prev_product: &G1Affine) {
         assert_eq!(
             Bls12_381::pairing(self.g1_powers[1], G2Affine::prime_subgroup_generator()),
-            Bls12_381::pairing(*transcript.products.last().unwrap(), self.pubkey)
+            Bls12_381::pairing(*prev_product, self.pubkey)
         );
+    }
 
-        // Verify g1 powers w.r.t. g2[1]
+    #[instrument(level = "info", skip_all)]
+    fn verify_g1(&self) {
         let (factors, sum) = random_factors(self.g1_powers.len() - 1);
         let lhs_g1 = VariableBaseMSM::multi_scalar_mul(&self.g1_powers[1..], &factors[..]);
         let lhs_g2 = G2Affine::prime_subgroup_generator().mul(sum);
-        let rhs_g1 = VariableBaseMSM::multi_scalar_mul(
-            &self.g1_powers[..factors.len()],
-            &factors[..],
-        );
+        let rhs_g1 =
+            VariableBaseMSM::multi_scalar_mul(&self.g1_powers[..factors.len()], &factors[..]);
         let rhs_g2 = self.g2_powers[1].mul(sum);
         assert_eq!(
             Bls12_381::pairing(lhs_g1, lhs_g2),
             Bls12_381::pairing(rhs_g1, rhs_g2)
         );
+    }
 
-        // Verify g2 powers
+    #[instrument(level = "info", skip_all)]
+    fn verify_g2(&self) {
         let (factors, sum) = random_factors(self.g2_powers.len());
-        let lhs_g1 = VariableBaseMSM::multi_scalar_mul(&self.g1_powers[..factors.len()], &factors[..]);
+        let lhs_g1 =
+            VariableBaseMSM::multi_scalar_mul(&self.g1_powers[..factors.len()], &factors[..]);
         let lhs_g2 = G2Affine::prime_subgroup_generator().mul(sum);
         let rhs_g1 = G1Affine::prime_subgroup_generator().mul(sum);
         let rhs_g2 = VariableBaseMSM::multi_scalar_mul(&self.g2_powers[..], &factors[..]);
@@ -349,12 +373,11 @@ pub mod bench {
     use super::*;
     use ark_bls12_381::{g1, g2};
     use ark_ff::UniformRand;
-    use criterion::{black_box, BatchSize, Criterion};
+    use criterion::{black_box, BatchSize, BenchmarkId, Criterion};
     use proptest::{
         strategy::{Strategy, ValueTree},
         test_runner::TestRunner,
     };
-    use criterion::BenchmarkId;
 
     pub fn group(criterion: &mut Criterion) {
         bench_pow_tau(criterion);
@@ -384,13 +407,17 @@ pub mod bench {
 
     fn bench_verify(criterion: &mut Criterion) {
         for size in SIZES {
-            criterion.bench_with_input(BenchmarkId::new("contribution/verify", format!("{:?}", size)), &size, move |bencher, (n1, n2)| {
-                let mut transcript = Transcript::new(*n1, *n2);
-                let mut contrib = Contribution::new(*n1, *n2);
-                let mut rng = rand::thread_rng();
-                contrib.add_tau(&Fr::rand(&mut rng));
-                bencher.iter(|| contrib.verify(&transcript));
-            });
+            criterion.bench_with_input(
+                BenchmarkId::new("contribution/verify", format!("{:?}", size)),
+                &size,
+                move |bencher, (n1, n2)| {
+                    let mut transcript = Transcript::new(*n1, *n2);
+                    let mut contrib = Contribution::new(*n1, *n2);
+                    let mut rng = rand::thread_rng();
+                    contrib.add_tau(&Fr::rand(&mut rng));
+                    bencher.iter(|| contrib.verify(&transcript));
+                },
+            );
         }
     }
 }
