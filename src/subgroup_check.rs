@@ -3,7 +3,7 @@
 /// Taken from latest (unreleased) arkworks:
 /// See [bls12_381/src/curves/g1.rs](https://github.com/arkworks-rs/curves/blob/dc555882cd867b1e5b6fb16f840ebb0b336136d1/bls12_381/src/curves/g1.rs#L48)
 /// See [bls12_381/src/curves/g2.rs](https://github.com/arkworks-rs/curves/blob/dc555882cd867b1e5b6fb16f840ebb0b336136d1/bls12_381/src/curves/g2.rs#L112)
-use ark_bls12_381::{Fq, G1Affine, G1Projective, G2Projective, Parameters};
+use ark_bls12_381::{Fq, Fr, G1Affine, G1Projective, G2Projective, Parameters};
 use ark_bls12_381::{Fq2, G2Affine};
 use ark_ec::{bls12::Bls12Parameters, AffineCurve, ProjectiveCurve};
 use ark_ff::{field_new, BigInteger384, Field, Zero};
@@ -43,6 +43,17 @@ pub fn g2_subgroup_check(point: &G2Affine) -> bool {
     let p_times_point = g2_endomorphism(point);
 
     x_times_point.eq(&p_times_point)
+}
+
+/// Implements scalar-point multiplication using Gallant-Lambert-Vanstone (GLV).
+pub fn g1_mult_glv(point: G1Affine, scalar: Fr) -> G1Affine {
+    todo!()
+}
+
+/// Implements scalar-point multiplication using Galbraith-Lin-Scott
+/// See <https://www.iacr.org/archive/eurocrypt2009/54790519/54790519.pdf>
+pub fn g2_mult_gls(point: G2Affine, scalar: Fr) -> G2Affine {
+    todo!()
 }
 
 #[inline]
@@ -134,4 +145,33 @@ pub fn g2_endomorphism(p: &G2Affine) -> G2Affine {
     );
 
     res
+}
+
+const G1_LAMBDA: u64 = 0xd201000000010000;
+const G1_LAMBDA_2: [u64; 2] = [0x0000000100000000, 0xac45a4010001a402];
+
+#[cfg(test)]
+pub mod test {
+    use super::*;
+    use ark_bls12_381::{G1Affine, G2Affine};
+    use ark_ec::AffineCurve;
+    use ark_ff::UniformRand;
+    use proptest::proptest;
+
+    fn rand_point() -> G1Affine {
+        let mut rng = rand::thread_rng();
+        G1Affine::prime_subgroup_generator()
+            .mul(Fr::rand(&mut rng))
+            .into_affine()
+    }
+
+    #[test]
+    fn test_g1_endomorphism() {
+        let x = rand_point();
+
+        // let expected = g1_mul_bigint(&x, &[G1_LAMBDA]).into_affine();
+        let expected = g1_mul_bigint(&x, &G1_LAMBDA_2).neg().into_affine();
+        let value = g1_endomorphism(&x);
+        assert_eq!(value, expected);
+    }
 }
