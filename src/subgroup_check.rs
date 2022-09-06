@@ -6,9 +6,8 @@
 use ark_bls12_381::{Fq, Fr, G1Affine, G1Projective, G2Projective, Parameters};
 use ark_bls12_381::{Fq2, G2Affine};
 use ark_ec::{bls12::Bls12Parameters, AffineCurve, ProjectiveCurve};
-use ark_ff::{field_new, BigInteger384, Field, PrimeField, Zero};
+use ark_ff::{field_new, BigInteger384, Field, PrimeField, UniformRand, Zero};
 use std::ops::{Add, Neg};
-use ark_ff::UniformRand;
 
 /// is_in_correct_subgroup_assuming_on_curve
 #[inline]
@@ -188,47 +187,38 @@ fn g1_mul_glv(p: &G1Affine, tau: Fr) -> G1Projective {
 #[cfg(test)]
 pub mod test {
     use super::*;
+    use crate::test::{arb_fr, arb_g1};
     use ark_bls12_381::{G1Affine, G2Affine};
     use ark_ec::AffineCurve;
     use ark_ff::{BigInteger256, PrimeField, UniformRand};
     use proptest::proptest;
 
-    fn rand_fr() -> Fr {
-        let mut rng = rand::thread_rng();
-        Fr::rand(&mut rng)
-    }
-
-    fn rand_g1() -> G1Affine {
-        G1Affine::prime_subgroup_generator()
-            .mul(rand_fr())
-            .into_affine()
-    }
-
     #[test]
     fn test_g1_endomorphism() {
-        let x = rand_g1();
-
-        let expected = g1_mul_bigint(&x, &G1_LAMBDA_2).neg().into_affine();
-        let value = g1_endomorphism(&x);
-        assert_eq!(value, expected);
+        proptest!(|(p in arb_g1())| {
+            let expected = g1_mul_bigint(&p, &G1_LAMBDA_2).neg().into_affine();
+            let value = g1_endomorphism(&p);
+            assert_eq!(value, expected);
+        });
     }
 
     #[test]
     fn test_g1_split() {
-        let x = rand_fr();
-        let (k0, k1) = g1_split(x);
         let lambda = Fr::from_repr(BigInteger256([G1_LAMBDA_2[0], G1_LAMBDA_2[1], 0, 0])).unwrap();
-        let value = Fr::from(k0) + Fr::from(k1) * lambda;
-        assert_eq!(value, x);
+        proptest!(|(s in arb_fr())| {
+            let (k0, k1) = g1_split(s);
+            let value = Fr::from(k0) + Fr::from(k1) * lambda;
+            assert_eq!(value, s);
+        });
     }
 
     #[test]
     fn test_g1_mul_glv() {
-        let p = rand_g1();
-        let s = rand_fr();
-        let expected = p.mul(s);
-        let value = g1_mul_glv(&p, s);
-        assert_eq!(value, expected);
+        proptest!(|(p in arb_g1(), s in arb_fr())| {
+            let expected = p.mul(s);
+            let value = g1_mul_glv(&p, s);
+            assert_eq!(value, expected);
+        });
     }
 }
 
@@ -236,23 +226,9 @@ pub mod test {
 #[doc(hidden)]
 pub mod bench {
     use super::*;
+    use crate::bench::{rand_fr, rand_g1};
     use ark_bls12_381::{g1, g2};
     use criterion::{black_box, BatchSize, Criterion};
-    use proptest::{
-        strategy::{Strategy, ValueTree},
-        test_runner::TestRunner,
-    };
-
-    fn rand_fr() -> Fr {
-        let mut rng = rand::thread_rng();
-        Fr::rand(&mut rng)
-    }
-
-    fn rand_g1() -> G1Affine {
-        G1Affine::prime_subgroup_generator()
-            .mul(rand_fr())
-            .into_affine()
-    }
 
     pub fn group(criterion: &mut Criterion) {
         bench_g1_mul(criterion);

@@ -126,9 +126,20 @@ fn parse_url(url: &Url) -> Result<(SocketAddr, &str)> {
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use proptest::proptest;
+    use ark_bls12_381::G1Affine;
+    use ark_ec::{AffineCurve, ProjectiveCurve};
+    use ark_ff::{BigInteger256, PrimeField};
+    use proptest::{arbitrary::any, proptest, strategy::Strategy};
     use tracing::{error, warn};
     use tracing_test::traced_test;
+
+    pub fn arb_fr() -> impl Strategy<Value = Fr> {
+        any::<[u64; 4]>().prop_map(|v| Fr::from(BigInteger256(v)))
+    }
+
+    pub fn arb_g1() -> impl Strategy<Value = G1Affine> {
+        arb_fr().prop_map(|s| G1Affine::prime_subgroup_generator().mul(s).into_affine())
+    }
 
     #[test]
     #[allow(clippy::eq_op)]
@@ -172,6 +183,7 @@ pub mod test {
 #[doc(hidden)]
 pub mod bench {
     use super::*;
+    use ark_ec::{AffineCurve, ProjectiveCurve};
     use criterion::{black_box, BatchSize, Criterion};
     use proptest::{
         strategy::{Strategy, ValueTree},
@@ -179,6 +191,23 @@ pub mod bench {
     };
     use std::time::Duration;
     use tokio::runtime;
+
+    pub fn rand_fr() -> Fr {
+        let mut rng = rand::thread_rng();
+        Fr::rand(&mut rng)
+    }
+
+    pub fn rand_g1() -> G1Affine {
+        G1Affine::prime_subgroup_generator()
+            .mul(rand_fr())
+            .into_affine()
+    }
+
+    pub fn rand_g2() -> G2Affine {
+        G2Affine::prime_subgroup_generator()
+            .mul(rand_fr())
+            .into_affine()
+    }
 
     pub fn group(criterion: &mut Criterion) {
         bench_example_proptest(criterion);
