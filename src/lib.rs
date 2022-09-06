@@ -129,12 +129,11 @@ pub mod test {
     use super::*;
     use ark_bls12_381::{FrParameters, G1Affine};
     use ark_ec::{AffineCurve, ProjectiveCurve};
-    use ark_ff::{BigInteger256, PrimeField};
+    use ark_ff::{BigInteger256, FpParameters, PrimeField};
     use proptest::{arbitrary::any, proptest, strategy::Strategy};
     use ruint::aliases::U256;
     use tracing::{error, warn};
     use tracing_test::traced_test;
-    use ark_ff::FpParameters;
 
     pub fn arb_fr() -> impl Strategy<Value = Fr> {
         any::<U256>().prop_map(|mut n| {
@@ -145,6 +144,10 @@ pub mod test {
 
     pub fn arb_g1() -> impl Strategy<Value = G1Affine> {
         arb_fr().prop_map(|s| G1Affine::prime_subgroup_generator().mul(s).into_affine())
+    }
+
+    pub fn arb_g2() -> impl Strategy<Value = G2Affine> {
+        arb_fr().prop_map(|s| G2Affine::prime_subgroup_generator().mul(s).into_affine())
     }
 
     #[test]

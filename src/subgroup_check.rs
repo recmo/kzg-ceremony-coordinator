@@ -7,7 +7,7 @@ use ark_bls12_381::{Fq, Fr, G1Affine, G1Projective, G2Projective, Parameters};
 use ark_bls12_381::{Fq2, G2Affine};
 use ark_ec::{bls12::Bls12Parameters, AffineCurve, ProjectiveCurve};
 use ark_ff::{field_new, BigInteger384, Field, PrimeField, UniformRand, Zero};
-use std::ops::{Add, Neg};
+use std::ops::{Add, AddAssign, Neg};
 
 /// is_in_correct_subgroup_assuming_on_curve
 #[inline]
@@ -166,14 +166,17 @@ fn g1_mul_glv(p: &G1Affine, tau: Fr) -> G1Projective {
 
     // Compute endomorphism
     let q = g1_endomorphism(p).neg();
+    let pq = p.into_projective().add_mixed(&q);
 
     let mut res = G1Projective::zero();
     loop {
-        if bit & k0 != 0 {
-            res.add_assign_mixed(p);
-        }
-        if bit & k1 != 0 {
-            res.add_assign_mixed(&q);
+        let b0 = bit & k0 != 0;
+        let b1 = bit & k1 != 0;
+        match (b0, b1) {
+            (true, true) => res.add_assign(&pq),
+            (true, false) => res.add_assign_mixed(p),
+            (false, true) => res.add_assign_mixed(&q),
+            (false, false) => {}
         }
         bit >>= 1;
         if bit == 0 {
@@ -187,7 +190,7 @@ fn g1_mul_glv(p: &G1Affine, tau: Fr) -> G1Projective {
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use crate::test::{arb_fr, arb_g1};
+    use crate::test::{arb_fr, arb_g1, arb_g2};
     use ark_bls12_381::{G1Affine, G2Affine};
     use ark_ec::AffineCurve;
     use ark_ff::{BigInteger256, PrimeField, UniformRand};
@@ -198,6 +201,16 @@ pub mod test {
         proptest!(|(p in arb_g1())| {
             let expected = g1_mul_bigint(&p, &G1_LAMBDA_2).neg().into_affine();
             let value = g1_endomorphism(&p);
+            assert_eq!(value, expected);
+        });
+    }
+
+    #[test]
+    fn test_g1_check() {
+        // TODO: Generate points not in prime order subgroup.
+        proptest!(|(p in arb_g1())| {
+            let expected = p.is_in_correct_subgroup_assuming_on_curve();
+            let value = g1_subgroup_check(&p);
             assert_eq!(value, expected);
         });
     }
@@ -220,20 +233,77 @@ pub mod test {
             assert_eq!(value, expected);
         });
     }
+
+    #[test]
+    fn test_g2_endomorphism() {
+        proptest!(|(p in arb_g2())| {
+            let value = g2_endomorphism(&p);
+            // TODO: Compute expected value
+            // let expected = g2_mul_bigint(&p, &G1_LAMBDA_2).neg().into_affine();
+            // assert_eq!(value, expected);
+        });
+    }
+
+    #[test]
+    fn test_g2_check() {
+        // TODO: Generate points not in prime order subgroup.
+        proptest!(|(p in arb_g2())| {
+            let value = g2_subgroup_check(&p);
+            let expected = p.is_in_correct_subgroup_assuming_on_curve();
+            assert_eq!(value, expected);
+        });
+    }
 }
 
 #[cfg(feature = "bench")]
 #[doc(hidden)]
 pub mod bench {
     use super::*;
-    use crate::bench::{rand_fr, rand_g1};
+    use crate::bench::{rand_fr, rand_g1, rand_g2};
     use ark_bls12_381::{g1, g2};
     use criterion::{black_box, BatchSize, Criterion};
 
     pub fn group(criterion: &mut Criterion) {
+        bench_g1_endo(criterion);
+        bench_g1_check(criterion);
+        bench_g1_check_endo(criterion);
         bench_g1_mul(criterion);
         bench_g1_split(criterion);
         bench_g1_mul_glv(criterion);
+        bench_g2_endo(criterion);
+        bench_g2_check(criterion);
+        bench_g2_check_endo(criterion);
+        bench_g2_mul(criterion);
+    }
+
+    fn bench_g1_endo(criterion: &mut Criterion) {
+        criterion.bench_function("g1_endomorphism", move |bencher| {
+            bencher.iter_batched(
+                rand_g1,
+                |p| black_box(g1_endomorphism(&p)),
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    fn bench_g1_check(criterion: &mut Criterion) {
+        criterion.bench_function("g1_subgroup_check", move |bencher| {
+            bencher.iter_batched(
+                rand_g1,
+                |p| black_box(p.is_in_correct_subgroup_assuming_on_curve()),
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    fn bench_g1_check_endo(criterion: &mut Criterion) {
+        criterion.bench_function("g1_subgroup_check_endo", move |bencher| {
+            bencher.iter_batched(
+                rand_g1,
+                |p| black_box(g1_subgroup_check(&p)),
+                BatchSize::SmallInput,
+            );
+        });
     }
 
     fn bench_g1_mul(criterion: &mut Criterion) {
@@ -257,6 +327,46 @@ pub mod bench {
             bencher.iter_batched(
                 || (rand_g1(), rand_fr()),
                 |(p, s)| black_box(g1_mul_glv(black_box(&p), black_box(s))),
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    fn bench_g2_endo(criterion: &mut Criterion) {
+        criterion.bench_function("g2_endomorphism", move |bencher| {
+            bencher.iter_batched(
+                rand_g2,
+                |p| black_box(g2_endomorphism(&p)),
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    fn bench_g2_check(criterion: &mut Criterion) {
+        criterion.bench_function("g2_subgroup_check", move |bencher| {
+            bencher.iter_batched(
+                rand_g2,
+                |p| black_box(p.is_in_correct_subgroup_assuming_on_curve()),
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    fn bench_g2_check_endo(criterion: &mut Criterion) {
+        criterion.bench_function("g2_subgroup_check_endo", move |bencher| {
+            bencher.iter_batched(
+                rand_g2,
+                |p| black_box(g2_subgroup_check(&p)),
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    fn bench_g2_mul(criterion: &mut Criterion) {
+        criterion.bench_function("g2_mul", move |bencher| {
+            bencher.iter_batched(
+                || (rand_g2(), rand_fr()),
+                |(p, s)| black_box(p.mul(black_box(s))),
                 BatchSize::SmallInput,
             );
         });
