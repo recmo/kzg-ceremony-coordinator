@@ -1,4 +1,7 @@
-use crate::parse_g::{parse_g, ParseError};
+use crate::{
+    g1_subgroup_check, g2_subgroup_check,
+    parse_g::{parse_g, ParseError},
+};
 use ark_bls12_381::{g1, g2, Bls12_381, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
 use ark_ec::{msm::VariableBaseMSM, AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::{One, PrimeField, UniformRand, Zero};
@@ -11,7 +14,6 @@ use thiserror::Error;
 use tracing::{error, instrument};
 use valico::json_schema::{Schema, Scope};
 use zeroize::Zeroizing;
-use crate::g1_subgroup_check;
 
 pub const SIZES: [(usize, usize); 4] = [(4096, 65), (8192, 65), (16384, 65), (32768, 65)];
 
@@ -243,7 +245,7 @@ impl Contribution {
             .for_each(|point| assert!(g1_subgroup_check(point)));
         self.g2_powers
             .par_iter()
-            .for_each(|point| assert!(point.is_in_correct_subgroup_assuming_on_curve()));
+            .for_each(|point| assert!(g2_subgroup_check(point)));
     }
 
     #[instrument(level = "info", skip_all)]

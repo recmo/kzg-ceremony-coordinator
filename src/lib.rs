@@ -27,7 +27,7 @@ use tracing::{error, info, info_span};
 use url::{Host, Url};
 use valico::json_schema;
 
-pub use crate::subgroup_check::g1_subgroup_check;
+pub use crate::subgroup_check::{g1_subgroup_check, g2_subgroup_check};
 
 #[derive(Clone, Debug, PartialEq, Parser)]
 pub struct Options {
