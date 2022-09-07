@@ -1,4 +1,4 @@
-# KZG Ceremony Coordinator
+# KZG Ceremony Library
 
 Implements the formats and cryptography for the [Ethereum KZG Ceremony](https://github.com/ethereum/kzg-ceremony-specs/).
 

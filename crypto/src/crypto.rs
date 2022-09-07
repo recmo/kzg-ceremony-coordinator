@@ -11,6 +11,7 @@ use std::ops::{AddAssign, Neg};
 
 /// is_in_correct_subgroup_assuming_on_curve
 #[inline]
+#[must_use]
 pub fn g1_subgroup_check(p: &G1Affine) -> bool {
     // Algorithm from Section 6 of https://eprint.iacr.org/2021/1130.
     //
@@ -30,6 +31,7 @@ pub fn g1_subgroup_check(p: &G1Affine) -> bool {
 }
 
 #[inline]
+#[must_use]
 pub fn g2_subgroup_check(point: &G2Affine) -> bool {
     // Algorithm from Section 4 of https://eprint.iacr.org/2021/1130.
     //
@@ -46,6 +48,7 @@ pub fn g2_subgroup_check(point: &G2Affine) -> bool {
 }
 
 #[inline]
+#[must_use]
 fn g1_mul_bigint(base: &G1Affine, scalar: &[u64]) -> G1Projective {
     let mut res = G1Projective::zero();
     for b in ark_ff::BitIteratorBE::without_leading_zeros(scalar) {
@@ -58,6 +61,7 @@ fn g1_mul_bigint(base: &G1Affine, scalar: &[u64]) -> G1Projective {
 }
 
 #[inline]
+#[must_use]
 fn g1_mul_bigint_proj(base: &G1Projective, scalar: &[u64]) -> G1Projective {
     let mut res = G1Projective::zero();
     for b in ark_ff::BitIteratorBE::without_leading_zeros(scalar) {
@@ -70,6 +74,7 @@ fn g1_mul_bigint_proj(base: &G1Projective, scalar: &[u64]) -> G1Projective {
 }
 
 #[inline]
+#[must_use]
 fn g2_mul_bigint(base: &G2Affine, scalar: &[u64]) -> G2Projective {
     let mut res = G2Projective::zero();
     for b in ark_ff::BitIteratorBE::without_leading_zeros(scalar) {
@@ -82,6 +87,7 @@ fn g2_mul_bigint(base: &G2Affine, scalar: &[u64]) -> G2Projective {
 }
 
 #[inline]
+#[must_use]
 pub fn g1_endomorphism(p: &G1Affine) -> G1Affine {
     /// BETA is a non-trivial cubic root of unity in Fq.
     const BETA: Fq = field_new!(Fq, "793479390729215512621379701633421447060886740281060493010456487427281649075476305620758731620350");
@@ -95,6 +101,7 @@ pub fn g1_endomorphism(p: &G1Affine) -> G1Affine {
 }
 
 #[inline]
+#[must_use]
 pub fn g2_endomorphism(p: &G2Affine) -> G2Affine {
     // The p-power endomorphism for G2 is defined as follows:
     // 1. Note that G2 is defined on curve E': y^2 = x^3 + 4(u+1).
@@ -140,6 +147,7 @@ const G1_LAMBDA: u64 = 0xd201_0000_0001_0000;
 const G1_LAMBDA_2: [u64; 2] = [0x0000_0001_0000_0000, 0xac45_a401_0001_a402];
 
 #[inline]
+#[must_use]
 fn g1_split(tau: Fr) -> (u128, u128) {
     let mut tau = tau.into_repr().0;
     let mut divisor = G1_LAMBDA_2;
@@ -150,7 +158,8 @@ fn g1_split(tau: Fr) -> (u128, u128) {
 }
 
 /// Implements scalar-point multiplication using Gallant-Lambert-Vanstone (GLV).
-fn g1_mul_glv(p: &G1Affine, tau: Fr) -> G1Projective {
+#[must_use]
+pub fn g1_mul_glv(p: &G1Affine, tau: Fr) -> G1Projective {
     let (k0, k1) = g1_split(tau);
 
     // Find first bit set

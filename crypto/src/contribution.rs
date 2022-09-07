@@ -1,4 +1,4 @@
-use crate::{g1_subgroup_check, g2_subgroup_check, parse_g, ParseError};
+use crate::{crypto::g1_mul_glv, g1_subgroup_check, g2_subgroup_check, parse_g, ParseError};
 use ark_bls12_381::{g1, g2, Bls12_381, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
 use ark_ec::{msm::VariableBaseMSM, AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::{One, PrimeField, UniformRand, Zero};
@@ -181,7 +181,7 @@ impl ContributionJson {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let pubkey = if let Some(pubkey) = &self.pot_pubkey {
-            parse_g::<g2::Parameters>(pubkey).map_err(|e| ContributionError::InvalidPubKey(e))?
+            parse_g::<g2::Parameters>(pubkey).map_err(ContributionError::InvalidPubKey)?
         } else {
             G2Affine::zero()
         };
@@ -203,6 +203,7 @@ impl PowersOfTau {
 }
 
 impl Transcript {
+    #[must_use]
     pub fn new(num_g1: usize, num_g2: usize) -> Self {
         Self {
             pubkeys:   vec![G2Affine::prime_subgroup_generator()],
@@ -260,7 +261,7 @@ impl Contribution {
             .g1_powers
             .par_iter()
             .zip(scalars.par_iter())
-            .map(|(c, pow_tau)| c.mul(*pow_tau))
+            .map(|(c, pow_tau)| g1_mul_glv(c, *pow_tau))
             .collect::<Vec<_>>();
         self.g1_powers = G1Projective::batch_normalization_into_affine(&projective[..]);
     }
@@ -354,6 +355,8 @@ pub mod test {
 #[cfg(feature = "bench")]
 #[doc(hidden)]
 pub mod bench {
+    use crate::bench::rand_fr;
+
     use super::*;
     use ark_ff::UniformRand;
     use criterion::{black_box, BatchSize, BenchmarkId, Criterion};
@@ -373,28 +376,32 @@ pub mod bench {
     }
 
     fn bench_add_tau(criterion: &mut Criterion) {
-        criterion.bench_function("contribution/add_tau", move |bencher| {
-            let mut contrib = Contribution::new(32768, 65);
-            let mut rng = rand::thread_rng();
-            bencher.iter_batched(
-                || Zeroizing::new(Fr::rand(&mut rng)),
-                |tau| contrib.add_tau(&tau),
-                BatchSize::SmallInput,
+        for size in crate::SIZES {
+            criterion.bench_with_input(
+                BenchmarkId::new("contribution/add_tau", format!("{:?}", size)),
+                &size,
+                move |bencher, (n1, n2)| {
+                    let mut contrib = Contribution::new(*n1, *n2);
+                    bencher.iter_batched(
+                        || rand_fr(),
+                        |tau| contrib.add_tau(&tau),
+                        BatchSize::SmallInput,
+                    );
+                },
             );
-        });
+        }
     }
 
     fn bench_verify(criterion: &mut Criterion) {
-        for size in SIZES {
+        for size in crate::SIZES {
             criterion.bench_with_input(
                 BenchmarkId::new("contribution/verify", format!("{:?}", size)),
                 &size,
                 move |bencher, (n1, n2)| {
                     let mut transcript = Transcript::new(*n1, *n2);
                     let mut contrib = Contribution::new(*n1, *n2);
-                    let mut rng = rand::thread_rng();
-                    contrib.add_tau(&Fr::rand(&mut rng));
-                    bencher.iter(|| contrib.verify(&transcript));
+                    contrib.add_tau(&rand_fr());
+                    bencher.iter(|| black_box(contrib.verify(&transcript)));
                 },
             );
         }

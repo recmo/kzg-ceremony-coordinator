@@ -17,7 +17,7 @@ pub mod test {
     use ark_bls12_381::{Fr, FrParameters, G1Affine, G2Affine};
     use ark_ec::{AffineCurve, ProjectiveCurve};
     use ark_ff::{BigInteger256, FpParameters, PrimeField};
-    use proptest::{arbitrary::any, proptest, strategy::Strategy};
+    use proptest::{arbitrary::any, strategy::Strategy};
     use ruint::aliases::U256;
 
     pub fn arb_fr() -> impl Strategy<Value = Fr> {
@@ -44,7 +44,6 @@ pub mod bench {
     use ark_ec::{AffineCurve, ProjectiveCurve};
     use ark_ff::UniformRand;
     use criterion::Criterion;
-    use std::time::Duration;
 
     pub fn rand_fr() -> Fr {
         let mut rng = rand::thread_rng();
