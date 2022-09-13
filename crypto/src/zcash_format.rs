@@ -141,13 +141,14 @@ pub fn encode_p<P: SWModelParameters>(p: GroupAffine<P>) -> std::string::String 
         "ZCash encoding spec requires three prefix bits, but there is not enough padding."
     );
 
-    let mut buffer: Vec<u8> = Vec::with_capacity(size);
+    let mut buffer = vec![0u8; size];
     p.serialize(&mut buffer[..])
         .expect("point serialization failed");
     // set the third most significant bit to the same as the first bit (signal)
     buffer[size - 1] |= (buffer[size - 1] & 0x80) >> 2;
     // set the most significant bit to 1 (compressed form)
     buffer[size - 1] |= 0x80;
+    buffer.reverse();
 
     format!("0x{}", hex::encode(buffer))
 }
