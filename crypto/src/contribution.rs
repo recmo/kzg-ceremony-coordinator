@@ -1,5 +1,5 @@
 use crate::{
-    crypto::g1_mul_glv, g1_subgroup_check, g2_subgroup_check, json_schema::CONTRIBUTION_SCHEMA,
+    crypto::g1_mul_glv, g1_subgroup_check, g2_subgroup_check,
     parse_g, ParseError,
 };
 use ark_bls12_381::{g1, g2, Bls12_381, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
@@ -11,7 +11,6 @@ use serde_json::Value;
 use std::{cmp::max, iter};
 use thiserror::Error;
 use tracing::{error, info, instrument};
-use valico::json_schema::{self, schema::ScopedSchema};
 use zeroize::Zeroizing;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -91,6 +90,9 @@ impl ContributionsJson {
 
     #[cfg(feature = "schema-validation")]
     pub fn from_json(json: &str) -> Result<Self, ContributionsError> {
+        use crate::json_schema::CONTRIBUTION_SCHEMA;
+        use valico::json_schema::{self, schema::ScopedSchema};
+
         let json: Value =
             serde_json::from_str(json).map_err(|_| ContributionsError::InvalidSchema())?;
 

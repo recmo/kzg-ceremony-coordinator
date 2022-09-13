@@ -14,7 +14,7 @@ license-file = "../mit-license.md"
 [features]
 default = [ ]
 bench = [ "criterion" ]
-schema-validation = [ ]
+schema-validation = [ "valico" ]
 
 [[bench]]
 name = "criterion"
@@ -36,7 +36,7 @@ serde = { version = "1.0.144", features = ["derive"] }
 serde_json = "1.0.85"
 thiserror = "1.0.34"
 tracing = "0.1.36"
-valico = "3.6.1"
+valico = { version = "3.6.1", optional = true }
 zeroize = "1.5.7"
 
 [dev-dependencies]
