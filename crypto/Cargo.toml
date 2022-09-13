@@ -27,6 +27,7 @@ criterion = { version = "0.3.6", optional = true } # Dev dep for bench
 ark-bls12-381 = "0.3.0"
 ark-ec = { version = "0.3.0", features = ["parallel"] }
 ark-ff = { version = "0.3.0", features = ["parallel", "asm"] }
+ark-serialize = { version = "0.3" }
 hex = "0.4.3"
 once_cell = "1.8"
 rand = "0.8.5"

@@ -1,6 +1,6 @@
 use crate::{
     crypto::g1_mul_glv, g1_subgroup_check, g2_subgroup_check, json_schema::CONTRIBUTION_SCHEMA,
-    parse_g, ParseError,
+    parse_g, zcash_format::encode_p, ParseError,
 };
 use ark_bls12_381::{g1, g2, Bls12_381, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
 use ark_ec::{msm::VariableBaseMSM, AffineCurve, PairingEngine, ProjectiveCurve};
@@ -344,6 +344,29 @@ impl Contribution {
             Bls12_381::pairing(lhs_g1, lhs_g2),
             Bls12_381::pairing(rhs_g1, rhs_g2)
         );
+    }
+}
+
+// Convert from Contribution to ContributionJson
+impl From<Contribution> for ContributionJson {
+    fn from(contribution: Contribution) -> Self {
+        Self {
+            num_g1_powers: contribution.g1_powers.len(),
+            num_g2_powers: contribution.g2_powers.len(),
+            pot_pubkey:    Some(encode_p::<g2::Parameters>(contribution.pubkey)),
+            powers_of_tau: PowersOfTau {
+                g1_powers: contribution
+                    .g1_powers
+                    .into_par_iter()
+                    .map(encode_p::<g1::Parameters>)
+                    .collect::<Vec<_>>(),
+                g2_powers: contribution
+                    .g2_powers
+                    .into_par_iter()
+                    .map(encode_p::<g2::Parameters>)
+                    .collect::<Vec<_>>(),
+            },
+        }
     }
 }
 
