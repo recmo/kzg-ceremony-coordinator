@@ -1,12 +1,16 @@
-use crate::{crypto::g1_mul_glv, g1_subgroup_check, g2_subgroup_check, parse_g, ParseError};
+use crate::{
+    crypto::g1_mul_glv, g1_subgroup_check, g2_subgroup_check,
+    parse_g, ParseError,
+};
 use ark_bls12_381::{g1, g2, Bls12_381, Fr, G1Affine, G1Projective, G2Affine, G2Projective};
 use ark_ec::{msm::VariableBaseMSM, AffineCurve, PairingEngine, ProjectiveCurve};
 use ark_ff::{One, PrimeField, UniformRand, Zero};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{cmp::max, iter};
 use thiserror::Error;
-use tracing::{error, instrument};
+use tracing::{error, info, instrument};
 use zeroize::Zeroizing;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -52,6 +56,8 @@ pub enum ContributionsError {
     InvalidContribution(usize, #[source] ContributionError),
     #[error("Unexpected number of contributions: expected {0}, got {1}")]
     InvalidContributionCount(usize, usize),
+    #[error("Error validating schema")]
+    InvalidSchema(),
 }
 
 #[derive(Clone, Copy, PartialEq, Debug, Error)]
@@ -82,21 +88,41 @@ impl ContributionsJson {
         }
     }
 
+    #[cfg(feature = "schema-validation")]
     pub fn from_json(json: &str) -> Result<Self, ContributionsError> {
-        // let json = serde_json::from_str(json)?;
-        // let validation = schema.validate(&initial);
-        // if !validation.is_strictly_valid() {
-        //     for error in validation.errors {
-        //         error!("{}", error);
-        //     }
-        //     for missing in validation.missing {
-        //         error!("Missing {}", missing);
-        //     }
-        //     // TODO bail!("Initial contribution is not valid.");
-        // }
-        // info!("Initial contribution is json-schema valid.");
-        // TODO:
-        todo!()
+        use crate::json_schema::CONTRIBUTION_SCHEMA;
+        use valico::json_schema::{self, schema::ScopedSchema};
+
+        let json: Value =
+            serde_json::from_str(json).map_err(|_| ContributionsError::InvalidSchema())?;
+
+        let validation = ScopedSchema::new(
+            &json_schema::Scope::new(),
+            &CONTRIBUTION_SCHEMA.lock().unwrap(),
+        )
+        .validate(&json);
+
+        if !validation.is_strictly_valid() {
+            for error in validation.errors {
+                error!("{}", error);
+            }
+            for missing in validation.missing {
+                error!("Missing {}", missing);
+            }
+            error!("Initial contribution is json-schema invalid.");
+            return Err(ContributionsError::InvalidSchema());
+        }
+        info!("Initial contribution is json-schema valid.");
+
+        serde_json::from_value::<Self>(json).map_err(|e| ContributionsError::InvalidSchema())
+    }
+
+    #[cfg(not(feature = "schema-validation"))]
+    pub fn from_json(json: &str) -> Result<Self, ContributionsError> {
+        let json: Value =
+            serde_json::from_str(json).map_err(|_| ContributionsError::InvalidSchema())?;
+
+        serde_json::from_value::<Self>(json).map_err(|e| ContributionsError::InvalidSchema())
     }
 
     pub fn parse(&self) -> Result<Vec<Contribution>, ContributionsError> {
