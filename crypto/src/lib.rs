@@ -4,9 +4,13 @@
 
 mod contribution;
 mod crypto;
+mod json_schema;
 mod zcash_format;
 
-pub use contribution::{Contribution, ContributionError, ContributionsError, Transcript};
+pub use contribution::{
+    Contribution, ContributionError, ContributionJson, ContributionsError, ContributionsJson,
+    Transcript,
+};
 pub use crypto::{g1_subgroup_check, g2_subgroup_check};
 pub use zcash_format::{parse_g, ParseError};
 

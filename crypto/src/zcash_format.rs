@@ -6,6 +6,7 @@ use ark_ff::{
     fields::{Field, FpParameters, PrimeField},
     BigInteger, Zero,
 };
+use ark_serialize::CanonicalSerialize;
 use hex::FromHexError;
 use thiserror::Error;
 
@@ -114,11 +115,39 @@ pub fn parse_g<P: SWModelParameters>(hex: &str) -> Result<GroupAffine<P>, ParseE
     let point =
         GroupAffine::<P>::get_point_from_x(x, greatest).ok_or(ParseError::InvalidXCoordinate)?;
     debug_assert!(point.is_on_curve()); // Always true
-    if !point.is_in_correct_subgroup_assuming_on_curve() {
-        return Err(ParseError::InvalidSubgroup);
-    }
 
     Ok(point)
+}
+
+pub fn encode_p<P: SWModelParameters>(p: GroupAffine<P>) -> std::string::String {
+    // Create some type aliases for the base extension, field and int types.
+    type Extension<P> = <P as ModelParameters>::BaseField;
+    type Prime<P> = <Extension<P> as Field>::BasePrimeField;
+    type Int<P> = <Prime<P> as PrimeField>::BigInt;
+    let modulus = <Prime<P> as PrimeField>::Params::MODULUS;
+
+    // Compute sizes
+    let extension: usize = Extension::<P>::extension_degree()
+        .try_into()
+        .expect("Extension degree should fit usize.");
+    let element_size = Int::<P>::NUM_LIMBS * 8;
+    let size = extension * element_size;
+    let padding_bits = element_size * 8 - modulus.num_bits() as usize;
+    assert!(
+        padding_bits >= 3,
+        "ZCash encoding spec requires three prefix bits, but there is not enough padding."
+    );
+
+    let mut buffer = vec![0u8; size];
+    p.serialize(&mut buffer[..])
+        .expect("point serialization failed");
+    // set the third most significant bit to the same as the first bit (signal)
+    buffer[size - 1] |= (buffer[size - 1] & 0x80) >> 2;
+    // set the most significant bit to 1 (compressed form)
+    buffer[size - 1] |= 0x80;
+    buffer.reverse();
+
+    format!("0x{}", hex::encode(buffer))
 }
 
 #[cfg(test)]
